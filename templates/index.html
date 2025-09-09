@@ -1,0 +1,837 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cricket Data Scraper</title>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/tailwindcss/2.2.19/tailwind.min.css" rel="stylesheet">
+    <style>
+        :root {
+            --cricket-green: #1f6e3c;
+            --cricket-blue: #1e3d59;
+        }
+        .btn {
+            @apply px-4 py-2 rounded-lg transition-all duration-200;
+        }
+        .btn-primary {
+            background-color: var(--cricket-blue);
+            @apply text-white;
+        }
+        .btn-primary:hover {
+            background-color: var(--cricket-green);
+        }
+        .btn-secondary {
+            background-color: var(--cricket-green);
+            @apply text-white;
+        }
+        .btn-secondary:hover {
+            background-color: var(--cricket-blue);
+        }
+        .btn-analysis {
+            background: linear-gradient(45deg, #6366f1, #8b5cf6);
+            @apply text-white;
+        }
+        .btn-analysis:hover {
+            background: linear-gradient(45deg, #4f46e5, #7c3aed);
+        }
+        .btn-comparison {
+            background: linear-gradient(45deg, #f59e0b, #d97706);
+            @apply text-white;
+        }
+        .btn-comparison:hover {
+            background: linear-gradient(45deg, #d97706, #b45309);
+        }
+        .btn-country {
+            background: linear-gradient(45deg, #10b981, #059669);
+            @apply text-white;
+        }
+        .btn-country:hover {
+            background: linear-gradient(45deg, #059669, #047857);
+        }
+        .loading {
+            display: none;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        .custom-gradient {
+            background: linear-gradient(135deg, #1e3d59 0%, #1f6e3c 100%);
+        }
+        .stats-card {
+            background: linear-gradient(135deg, #f8fafc 0%, #e2e8f0 100%);
+            border-left: 4px solid var(--cricket-green);
+        }
+        .comparison-card {
+            background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
+            border-left: 4px solid #f59e0b;
+        }
+        .country-card {
+            background: linear-gradient(135deg, #ecfdf5 0%, #d1fae5 100%);
+            border-left: 4px solid #10b981;
+        }
+        .percentage-bar {
+            height: 20px;
+            border-radius: 10px;
+            overflow: hidden;
+            background-color: #e2e8f0;
+        }
+        .win-bar { background-color: #10b981; }
+        .loss-bar { background-color: #ef4444; }
+        .draw-bar { background-color: #6b7280; }
+        .metric-card {
+            background: white;
+            border-radius: 8px;
+            padding: 1rem;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            border-left: 4px solid #3b82f6;
+        }
+        .country-stat-card {
+            background: white;
+            border-radius: 8px;
+            padding: 1rem;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            border-left: 4px solid #10b981;
+            margin-bottom: 0.5rem;
+        }
+        .country-rank {
+            background: linear-gradient(45deg, #fbbf24, #f59e0b);
+            color: white;
+            border-radius: 50%;
+            width: 2rem;
+            height: 2rem;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+        }
+    </style>
+    <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+</head>
+<body class="bg-gray-100 min-h-screen flex items-center justify-center font-sans custom-gradient">
+    <main class="container mx-auto p-4 max-w-7xl">
+        <div class="bg-white rounded-lg shadow-xl p-8 mb-6 text-center">
+            <h1 class="text-4xl font-extrabold text-blue-900 mb-2">Cricket Data Scraper</h1>
+            <p class="text-gray-600 mb-6">Web Scraper for Cricket Statistics and Analytics</p>
+            
+            <div class="mb-6">
+                <h2 class="text-2xl font-bold mb-2 text-blue-900">Scrape Data</h2>
+                <div class="flex flex-wrap justify-center gap-4">
+                    <button onclick="startScraping('batting')" class="btn btn-primary">Scrape Batting</button>
+                    <button onclick="startScraping('bowling')" class="btn btn-primary">Scrape Bowling</button>
+                    <button onclick="startScraping('team')" class="btn btn-primary">Scrape Team</button>
+                </div>
+            </div>
+
+            <div class="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-4 gap-6 mb-6">
+                <div class="bg-gray-50 p-6 rounded-lg">
+                    <h2 class="text-xl font-bold mb-4 text-blue-900">Batting Analysis</h2>
+                    <div class="flex flex-col items-center gap-4">
+                        <select id="batting-player-select" class="form-select w-full max-w-sm rounded-lg border border-gray-300 py-2 px-3 focus:border-blue-500 focus:ring focus:ring-blue-200">
+                            <option value="">Select a Batting Player</option>
+                        </select>
+                        <button onclick="startBattingPlotting()" class="btn btn-primary w-full">Generate Batting Plot</button>
+                    </div>
+                </div>
+
+                <div class="bg-gray-50 p-6 rounded-lg">
+                    <h2 class="text-xl font-bold mb-4 text-green-900">Bowling Analysis</h2>
+                    <div class="flex flex-col items-center gap-4">
+                        <select id="bowling-player-select" class="form-select w-full max-w-sm rounded-lg border border-gray-300 py-2 px-3 focus:border-green-500 focus:ring focus:ring-green-200">
+                            <option value="">Select a Bowling Player</option>
+                        </select>
+                        <button onclick="startBowlingPlotting()" class="btn btn-secondary w-full">Generate Bowling Plot</button>
+                    </div>
+                </div>
+
+                <div class="bg-gray-50 p-6 rounded-lg">
+                    <h2 class="text-xl font-bold mb-4 text-orange-900">Batsman vs Bowler</h2>
+                    <div class="flex flex-col items-center gap-4">
+                        <select id="comparison-batsman-select" class="form-select w-full max-w-sm rounded-lg border border-gray-300 py-2 px-3 focus:border-orange-500 focus:ring focus:ring-orange-200">
+                            <option value="">Select Batsman</option>
+                        </select>
+                        <select id="comparison-bowler-select" class="form-select w-full max-w-sm rounded-lg border border-gray-300 py-2 px-3 focus:border-orange-500 focus:ring focus:ring-orange-200">
+                            <option value="">Select Bowler (Optional)</option>
+                        </select>
+                        <button onclick="startBatsmanVsBowlerAnalysis()" class="btn btn-comparison w-full">Compare Performance</button>
+                    </div>
+                </div>
+
+                <div class="bg-gray-50 p-6 rounded-lg">
+                    <h2 class="text-xl font-bold mb-4 text-purple-900">Batting Impact</h2>
+                    <div class="flex flex-col items-center gap-4">
+                        <select id="batting-outcome-player-select" class="form-select w-full max-w-sm rounded-lg border border-gray-300 py-2 px-3 focus:border-purple-500 focus:ring focus:ring-purple-200">
+                            <option value="">Select a Batting Player</option>
+                        </select>
+                        <input type="number" id="min-score-input" placeholder="Minimum Score" min="0" class="form-input w-full max-w-sm rounded-lg border border-gray-300 py-2 px-3 focus:border-purple-500 focus:ring focus:ring-purple-200">
+                        <button onclick="startBattingOutcomeAnalysis()" class="btn btn-analysis w-full">Analyze Match Impact</button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
+                <div class="bg-gray-50 p-6 rounded-lg">
+                    <h2 class="text-xl font-bold mb-4 text-purple-900">Bowling Impact</h2>
+                    <div class="flex flex-col items-center gap-4">
+                        <select id="bowling-outcome-player-select" class="form-select w-full max-w-sm rounded-lg border border-gray-300 py-2 px-3 focus:border-purple-500 focus:ring focus:ring-purple-200">
+                            <option value="">Select a Bowling Player</option>
+                        </select>
+                        <input type="number" id="min-wickets-input" placeholder="Minimum Wickets" min="0" class="form-input w-full max-w-sm rounded-lg border border-gray-300 py-2 px-3 focus:border-purple-500 focus:ring focus:ring-purple-200">
+                        <button onclick="startBowlingOutcomeAnalysis()" class="btn btn-analysis w-full">Analyze Match Impact</button>
+                    </div>
+                </div>
+
+                <div class="bg-gray-50 p-6 rounded-lg">
+                    <h2 class="text-xl font-bold mb-4 text-emerald-900">Batting in Country</h2>
+                    <div class="flex flex-col items-center gap-4">
+                        <select id="batting-country-player-select" class="form-select w-full max-w-sm rounded-lg border border-gray-300 py-2 px-3 focus:border-emerald-500 focus:ring focus:ring-emerald-200">
+                            <option value="">Select a Batting Player</option>
+                        </select>
+                        <button onclick="startBattingByCountryAnalysis()" class="btn btn-country w-full">Analyze by Country</button>
+                    </div>
+                </div>
+
+                <div class="bg-gray-50 p-6 rounded-lg">
+                    <h2 class="text-xl font-bold mb-4 text-emerald-900">Bowling in Country</h2>
+                    <div class="flex flex-col items-center gap-4">
+                        <select id="bowling-country-player-select" class="form-select w-full max-w-sm rounded-lg border border-gray-300 py-2 px-3 focus:border-emerald-500 focus:ring focus:ring-emerald-200">
+                            <option value="">Select a Bowling Player</option>
+                        </select>
+                        <button onclick="startBowlingByCountryAnalysis()" class="btn btn-country w-full">Analyze by Country</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div id="results" class="bg-white rounded-lg shadow-md p-6 hidden">
+            <h2 class="text-2xl font-bold mb-4 text-center text-blue-900">Results</h2>
+            <div id="loading" class="flex justify-center my-4">
+                <div class="loading w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full"></div>
+            </div>
+            <pre id="result-content" class="bg-gray-50 p-4 rounded-lg overflow-x-auto"></pre>
+            <div id="plot" class="w-full"></div>
+            <div id="analysis-results" class="hidden">
+                </div>
+        </div>
+    </main>
+
+    <script>
+        const resultsContainer = document.getElementById('results');
+        const loadingSpinner = document.getElementById('loading');
+        const resultContent = document.getElementById('result-content');
+        const plotDiv = document.getElementById('plot');
+        const analysisResults = document.getElementById('analysis-results');
+        const battingPlayerSelect = document.getElementById('batting-player-select');
+        const bowlingPlayerSelect = document.getElementById('bowling-player-select');
+        const battingOutcomePlayerSelect = document.getElementById('batting-outcome-player-select');
+        const bowlingOutcomePlayerSelect = document.getElementById('bowling-outcome-player-select');
+        const comparisonBatsmanSelect = document.getElementById('comparison-batsman-select');
+        const comparisonBowlerSelect = document.getElementById('comparison-bowler-select');
+        const battingCountryPlayerSelect = document.getElementById('batting-country-player-select');
+        const bowlingCountryPlayerSelect = document.getElementById('bowling-country-player-select');
+        
+        // Function to populate the batting player dropdown
+        async function populateBattingPlayerDropdown() {
+            try {
+                const response = await fetch('/api/players');
+                const players = await response.json();
+                
+                // Update all batting dropdowns
+                const battingDropdowns = [
+                    battingPlayerSelect, 
+                    battingOutcomePlayerSelect, 
+                    comparisonBatsmanSelect,
+                    battingCountryPlayerSelect
+                ];
+                battingDropdowns.forEach(dropdown => {
+                    const currentValue = dropdown.value;
+                    if (dropdown === comparisonBatsmanSelect) {
+                        dropdown.innerHTML = '<option value="">Select Batsman</option>';
+                    } else {
+                        dropdown.innerHTML = '<option value="">Select a Batting Player</option>';
+                    }
+                    players.forEach(player => {
+                        const option = document.createElement('option');
+                        option.value = player;
+                        option.textContent = player;
+                        dropdown.appendChild(option);
+                    });
+                    if (currentValue) dropdown.value = currentValue;
+                });
+            } catch (error) {
+                console.error('Failed to fetch batting players:', error);
+            }
+        }
+
+        // Function to populate the bowling player dropdown
+        async function populateBowlingPlayerDropdown() {
+            try {
+                const response = await fetch('/api/bowling-players');
+                const players = await response.json();
+                
+                // Update all bowling dropdowns
+                const bowlingDropdowns = [
+                    bowlingPlayerSelect, 
+                    bowlingOutcomePlayerSelect, 
+                    comparisonBowlerSelect,
+                    bowlingCountryPlayerSelect
+                ];
+                bowlingDropdowns.forEach(dropdown => {
+                    const currentValue = dropdown.value;
+                    if (dropdown === comparisonBowlerSelect) {
+                        dropdown.innerHTML = '<option value="">Select Bowler (Optional)</option>';
+                    } else {
+                        dropdown.innerHTML = '<option value="">Select a Bowling Player</option>';
+                    }
+                    players.forEach(player => {
+                        const option = document.createElement('option');
+                        option.value = player;
+                        option.textContent = player;
+                        dropdown.appendChild(option);
+                    });
+                    if (currentValue) dropdown.value = currentValue;
+                });
+            } catch (error) {
+                console.error('Failed to fetch bowling players:', error);
+            }
+        }
+        
+        // Initial calls to populate dropdowns when the page loads
+        document.addEventListener('DOMContentLoaded', function() {
+            populateBattingPlayerDropdown();
+            populateBowlingPlayerDropdown();
+        });
+
+        function showResults() {
+            resultsContainer.classList.remove('hidden');
+            loadingSpinner.style.display = 'flex';
+            resultContent.style.display = 'none';
+            plotDiv.style.display = 'none';
+            analysisResults.style.display = 'none';
+        }
+
+        function hideLoading() {
+            loadingSpinner.style.display = 'none';
+        }
+
+        function startScraping(datasetType) {
+            showResults();
+            resultContent.style.display = 'block';
+            resultContent.textContent = 'Scraping in progress...';
+
+            fetch(`/scrape/${datasetType}`)
+                .then(response => response.json())
+                .then(data => {
+                    hideLoading();
+                    resultContent.textContent = JSON.stringify(data, null, 2);
+                    // Refresh player lists after scraping
+                    if (datasetType === 'batting') {
+                        populateBattingPlayerDropdown();
+                    } else if (datasetType === 'bowling') {
+                        populateBowlingPlayerDropdown();
+                    }
+                })
+                .catch(error => {
+                    hideLoading();
+                    resultContent.textContent = `Error: ${error.message}`;
+                });
+        }
+
+        function startBattingPlotting() {
+            const player = battingPlayerSelect.value;
+            if (!player) {
+                alert("Please select a batting player first.");
+                return;
+            }
+
+            showResults();
+            plotDiv.style.display = 'block';
+            plotDiv.innerHTML = ''; // Clear previous plot
+
+            fetch(`/plot/batting?player=${encodeURIComponent(player)}`)
+                .then(response => {
+                    if (!response.ok) {
+                        return response.json().then(err => { throw new Error(err.error); });
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    hideLoading();
+                    Plotly.newPlot(plotDiv, data.data, data.layout);
+                })
+                .catch(error => {
+                    hideLoading();
+                    plotDiv.innerHTML = `<p class="text-red-500 text-center">Error: ${error.message}</p>`;
+                });
+        }
+
+        function startBowlingPlotting() {
+            const player = bowlingPlayerSelect.value;
+            if (!player) {
+                alert("Please select a bowling player first.");
+                return;
+            }
+
+            showResults();
+            plotDiv.style.display = 'block';
+            plotDiv.innerHTML = ''; // Clear previous plot
+
+            fetch(`/plot/bowling?player=${encodeURIComponent(player)}`)
+                .then(response => {
+                    if (!response.ok) {
+                        return response.json().then(err => { throw new Error(err.error); });
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    hideLoading();
+                    Plotly.newPlot(plotDiv, data.data, data.layout);
+                })
+                .catch(error => {
+                    hideLoading();
+                    plotDiv.innerHTML = `<p class="text-red-500 text-center">Error: ${error.message}</p>`;
+                });
+        }
+
+        function startBatsmanVsBowlerAnalysis() {
+            const batsman = comparisonBatsmanSelect.value;
+            const bowler = comparisonBowlerSelect.value;
+            
+            if (!batsman) {
+                alert("Please select a batsman first.");
+                return;
+            }
+
+            showResults();
+            analysisResults.style.display = 'block';
+
+            const url = bowler ? 
+                `/analysis/batsman-vs-bowler?batsman=${encodeURIComponent(batsman)}&bowler=${encodeURIComponent(bowler)}` :
+                `/analysis/batsman-vs-bowler?batsman=${encodeURIComponent(batsman)}`;
+
+            fetch(url)
+                .then(response => response.json())
+                .then(data => {
+                    hideLoading();
+                    if (data.error) {
+                        analysisResults.innerHTML = `<p class="text-red-500 text-center">Error: ${data.error}</p>`;
+                    } else {
+                        displayBatsmanVsBowlerResults(data);
+                    }
+                })
+                .catch(error => {
+                    hideLoading();
+                    analysisResults.innerHTML = `<p class="text-red-500 text-center">Error: ${error.message}</p>`;
+                });
+        }
+
+        function startBattingOutcomeAnalysis() {
+            const player = battingOutcomePlayerSelect.value;
+            const minScore = document.getElementById('min-score-input').value;
+            
+            if (!player) {
+                alert("Please select a batting player first.");
+                return;
+            }
+            
+            if (!minScore || minScore < 0) {
+                alert("Please enter a valid minimum score.");
+                return;
+            }
+
+            showResults();
+            analysisResults.style.display = 'block';
+
+            fetch(`/analysis/batting-outcomes?player=${encodeURIComponent(player)}&min_score=${minScore}`)
+                .then(response => response.json())
+                .then(data => {
+                    hideLoading();
+                    if (data.error) {
+                        analysisResults.innerHTML = `<p class="text-red-500 text-center">Error: ${data.error}</p>`;
+                    } else {
+                        displayBattingOutcomeResults(data);
+                    }
+                })
+                .catch(error => {
+                    hideLoading();
+                    analysisResults.innerHTML = `<p class="text-red-500 text-center">Error: ${error.message}</p>`;
+                });
+        }
+
+        function startBowlingOutcomeAnalysis() {
+            const player = bowlingOutcomePlayerSelect.value;
+            const minWickets = document.getElementById('min-wickets-input').value;
+            
+            if (!player) {
+                alert("Please select a bowling player first.");
+                return;
+            }
+            
+            if (!minWickets || minWickets < 0) {
+                alert("Please enter a valid minimum wickets value.");
+                return;
+            }
+
+            showResults();
+            analysisResults.style.display = 'block';
+
+            fetch(`/analysis/bowling-outcomes?player=${encodeURIComponent(player)}&min_wickets=${minWickets}`)
+                .then(response => response.json())
+                .then(data => {
+                    hideLoading();
+                    if (data.error) {
+                        analysisResults.innerHTML = `<p class="text-red-500 text-center">Error: ${data.error}</p>`;
+                    } else {
+                        displayBowlingOutcomeResults(data);
+                    }
+                })
+                .catch(error => {
+                    hideLoading();
+                    analysisResults.innerHTML = `<p class="text-red-500 text-center">Error: ${error.message}</p>`;
+                });
+        }
+
+        function startBattingByCountryAnalysis() {
+            const player = battingCountryPlayerSelect.value;
+            
+            if (!player) {
+                alert("Please select a batting player first.");
+                return;
+            }
+
+            showResults();
+            analysisResults.style.display = 'block';
+
+            fetch(`/analysis/batting-by-country?player=${encodeURIComponent(player)}`)
+                .then(response => response.json())
+                .then(data => {
+                    hideLoading();
+                    if (data.error) {
+                        analysisResults.innerHTML = `<p class="text-red-500 text-center">Error: ${data.error}</p>`;
+                    } else {
+                        displayBattingByCountryResults(data);
+                    }
+                })
+                .catch(error => {
+                    hideLoading();
+                    analysisResults.innerHTML = `<p class="text-red-500 text-center">Error: ${error.message}</p>`;
+                });
+        }
+
+        function startBowlingByCountryAnalysis() {
+            const player = bowlingCountryPlayerSelect.value;
+            
+            if (!player) {
+                alert("Please select a bowling player first.");
+                return;
+            }
+
+            showResults();
+            analysisResults.style.display = 'block';
+
+            fetch(`/analysis/bowling-by-country?player=${encodeURIComponent(player)}`)
+                .then(response => response.json())
+                .then(data => {
+                    hideLoading();
+                    if (data.error) {
+                        analysisResults.innerHTML = `<p class="text-red-500 text-center">Error: ${data.error}</p>`;
+                    } else {
+                        displayBowlingByCountryResults(data);
+                    }
+                })
+                .catch(error => {
+                    hideLoading();
+                    analysisResults.innerHTML = `<p class="text-red-500 text-center">Error: ${error.message}</p>`;
+                });
+        }
+
+        function displayBatsmanVsBowlerResults(data) {
+            const bowlerInfo = data.bowler ? 
+                `<p class="text-center text-gray-600 mb-4">vs <strong>${data.bowler}</strong> (${data.bowler_team})</p>` : 
+                `<p class="text-center text-gray-600 mb-4">Overall Performance Analysis</p>`;
+
+            const comparisonSection = data.analysis_type === 'with_bowler' ? `
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+                    <div class="metric-card text-center">
+                        <div class="text-2xl font-bold text-blue-600 mb-1">${data.overall_average}</div>
+                        <div class="text-sm text-gray-600">Overall Average</div>
+                        <div class="text-xs text-gray-500">${data.total_runs_overall} runs / ${data.total_outs_overall} outs</div>
+                    </div>
+                    <div class="metric-card text-center">
+                        <div class="text-2xl font-bold text-green-600 mb-1">${data.average_with_bowler}</div>
+                        <div class="text-sm text-gray-600">With ${data.bowler}</div>
+                        <div class="text-xs text-gray-500">${data.total_runs_with_bowler} runs / ${data.total_outs_with_bowler} outs</div>
+                    </div>
+                    <div class="metric-card text-center">
+                        <div class="text-2xl font-bold text-orange-600 mb-1">${data.average_without_bowler}</div>
+                        <div class="text-sm text-gray-600">Without ${data.bowler}</div>
+                        <div class="text-xs text-gray-500">${data.total_runs_without_bowler} runs / ${data.total_outs_without_bowler} outs</div>
+                    </div>
+                </div>
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div class="text-center">
+                        <div class="text-xl font-bold text-gray-700">${data.total_matches_vs_opposition}</div>
+                        <div class="text-sm text-gray-600">Total vs ${data.bowler_team}</div>
+                    </div>
+                    <div class="text-center">
+                        <div class="text-xl font-bold text-green-700">${data.matches_with_bowler}</div>
+                        <div class="text-sm text-gray-600">With ${data.bowler}</div>
+                    </div>
+                    <div class="text-center">
+                        <div class="text-xl font-bold text-orange-700">${data.matches_without_bowler}</div>
+                        <div class="text-sm text-gray-600">Without ${data.bowler}</div>
+                    </div>
+                </div>
+            ` : `
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div class="metric-card text-center">
+                        <div class="text-3xl font-bold text-blue-600 mb-2">${data.overall_average}</div>
+                        <div class="text-lg text-gray-700 mb-1">Overall Batting Average</div>
+                        <div class="text-sm text-gray-500">${data.total_runs_overall} runs in ${data.total_outs_overall} dismissals</div>
+                    </div>
+                    <div class="metric-card text-center">
+                        <div class="text-3xl font-bold text-green-600 mb-2">${data.total_matches_vs_opposition}</div>
+                        <div class="text-lg text-gray-700 mb-1">Total Matches</div>
+                        <div class="text-sm text-gray-500">Against ${data.bowler_team || 'All Teams'}</div>
+                    </div>
+                </div>
+            `;
+
+            const html = `
+                <div class="comparison-card p-6 rounded-lg mb-4">
+                    <h3 class="text-2xl font-bold text-center mb-4 text-gray-800">
+                        ${data.batsman} Performance Analysis
+                    </h3>
+                    <p class="text-center text-gray-600 mb-2">
+                        Team: <strong>${data.batsman_team}</strong>
+                    </p>
+                    ${bowlerInfo}
+                    ${comparisonSection}
+                </div>
+            `;
+            analysisResults.innerHTML = html;
+        }
+
+        function displayBattingOutcomeResults(data) {
+            const html = `
+                <div class="stats-card p-6 rounded-lg mb-4">
+                    <h3 class="text-2xl font-bold text-center mb-4 text-gray-800">
+                        ${data.player} Batting Impact Analysis
+                    </h3>
+                    <p class="text-center text-gray-600 mb-6">
+                        Team: <strong>${data.team}</strong> | Minimum Score: <strong>${data.min_score} runs</strong>
+                    </p>
+                    
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <div class="text-center">
+                            <div class="text-3xl font-bold text-blue-600 mb-2">${data.total_matches}</div>
+                            <div class="text-gray-600">Total Qualifying Matches</div>
+                        </div>
+                        
+                        <div class="grid grid-cols-3 gap-2 text-center">
+                            <div>
+                                <div class="text-2xl font-bold text-green-600">${data.matches_won}</div>
+                                <div class="text-xs text-gray-600">Won</div>
+                            </div>
+                            <div>
+                                <div class="text-2xl font-bold text-red-600">${data.matches_lost}</div>
+                                <div class="text-xs text-gray-600">Lost</div>
+                            </div>
+                            <div>
+                                <div class="text-2xl font-bold text-gray-600">${data.matches_drawn}</div>
+                                <div class="text-xs text-gray-600">Drawn</div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="mt-6">
+                        <div class="mb-4">
+                            <div class="flex justify-between text-sm mb-1">
+                                <span>Winning Percentage</span>
+                                <span class="font-bold text-green-600">${data.winning_percentage}%</span>
+                            </div>
+                            <div class="percentage-bar">
+                                <div class="win-bar h-full" style="width: ${data.winning_percentage}%"></div>
+                            </div>
+                        </div>
+                        
+                        <div class="mb-4">
+                            <div class="flex justify-between text-sm mb-1">
+                                <span>Losing Percentage</span>
+                                <span class="font-bold text-red-600">${data.losing_percentage}%</span>
+                            </div>
+                            <div class="percentage-bar">
+                                <div class="loss-bar h-full" style="width: ${data.losing_percentage}%"></div>
+                            </div>
+                        </div>
+                        
+                        <div class="mb-4">
+                            <div class="flex justify-between text-sm mb-1">
+                                <span>Drawing Percentage</span>
+                                <span class="font-bold text-gray-600">${data.drawing_percentage}%</span>
+                            </div>
+                            <div class="percentage-bar">
+                                <div class="draw-bar h-full" style="width: ${data.drawing_percentage}%"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+            analysisResults.innerHTML = html;
+        }
+
+        function displayBowlingOutcomeResults(data) {
+            const html = `
+                <div class="stats-card p-6 rounded-lg mb-4">
+                    <h3 class="text-2xl font-bold text-center mb-4 text-gray-800">
+                        ${data.player} Bowling Impact Analysis
+                    </h3>
+                    <p class="text-center text-gray-600 mb-6">
+                        Team: <strong>${data.team}</strong> | Minimum Wickets: <strong>${data.min_wickets} wickets</strong>
+                    </p>
+                    
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <div class="text-center">
+                            <div class="text-3xl font-bold text-blue-600 mb-2">${data.total_matches}</div>
+                            <div class="text-gray-600">Total Qualifying Matches</div>
+                        </div>
+                        
+                        <div class="grid grid-cols-3 gap-2 text-center">
+                            <div>
+                                <div class="text-2xl font-bold text-green-600">${data.matches_won}</div>
+                                <div class="text-xs text-gray-600">Won</div>
+                            </div>
+                            <div>
+                                <div class="text-2xl font-bold text-red-600">${data.matches_lost}</div>
+                                <div class="text-xs text-gray-600">Lost</div>
+                            </div>
+                            <div>
+                                <div class="text-2xl font-bold text-gray-600">${data.matches_drawn}</div>
+                                <div class="text-xs text-gray-600">Drawn</div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="mt-6">
+                        <div class="mb-4">
+                            <div class="flex justify-between text-sm mb-1">
+                                <span>Winning Percentage</span>
+                                <span class="font-bold text-green-600">${data.winning_percentage}%</span>
+                            </div>
+                            <div class="percentage-bar">
+                                <div class="win-bar h-full" style="width: ${data.winning_percentage}%"></div>
+                            </div>
+                        </div>
+                        
+                        <div class="mb-4">
+                            <div class="flex justify-between text-sm mb-1">
+                                <span>Losing Percentage</span>
+                                <span class="font-bold text-red-600">${data.losing_percentage}%</span>
+                            </div>
+                            <div class="percentage-bar">
+                                <div class="loss-bar h-full" style="width: ${data.losing_percentage}%"></div>
+                            </div>
+                        </div>
+                        
+                        <div class="mb-4">
+                            <div class="flex justify-between text-sm mb-1">
+                                <span>Drawing Percentage</span>
+                                <span class="font-bold text-gray-600">${data.drawing_percentage}%</span>
+                            </div>
+                            <div class="percentage-bar">
+                                <div class="draw-bar h-full" style="width: ${data.drawing_percentage}%"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+            analysisResults.innerHTML = html;
+        }
+
+        function displayBattingByCountryResults(data) {
+            const countryStats = data.country_statistics.map((country, index) => `
+                <div class="country-stat-card">
+                    <div class="flex items-center justify-between">
+                        <div class="flex items-center gap-3">
+                            <div class="country-rank">${index + 1}</div>
+                            <div>
+                                <div class="font-bold text-lg text-gray-800">${country.country}</div>
+                                <div class="text-sm text-gray-600">${country.matches_played} matches</div>
+                            </div>
+                        </div>
+                        <div class="text-right">
+                            <div class="text-2xl font-bold text-green-600">${country.batting_average}</div>
+                            <div class="text-sm text-gray-500">${country.total_runs} runs / ${country.times_out} outs</div>
+                        </div>
+                    </div>
+                </div>
+            `).join('');
+
+            const html = `
+                <div class="country-card p-6 rounded-lg mb-4">
+                    <h3 class="text-2xl font-bold text-center mb-4 text-gray-800">
+                        ${data.player} Batting Performance by Country
+                    </h3>
+                    <p class="text-center text-gray-600 mb-6">
+                        Team: <strong>${data.player_team}</strong> | Countries Played In: <strong>${data.total_countries}</strong>
+                    </p>
+                    
+                    <div class="max-h-96 overflow-y-auto">
+                        ${countryStats}
+                    </div>
+                    
+                    <div class="mt-6 text-center">
+                        <p class="text-sm text-gray-500">
+                            Countries are ranked by batting average (highest to lowest)
+                        </p>
+                    </div>
+                </div>
+            `;
+            analysisResults.innerHTML = html;
+        }
+
+        function displayBowlingByCountryResults(data) {
+            const countryStats = data.country_statistics.map((country, index) => `
+                <div class="country-stat-card">
+                    <div class="flex items-center justify-between">
+                        <div class="flex items-center gap-3">
+                            <div class="country-rank">${index + 1}</div>
+                            <div>
+                                <div class="font-bold text-lg text-gray-800">${country.country}</div>
+                                <div class="text-sm text-gray-600">${country.matches_played} matches</div>
+                            </div>
+                        </div>
+                        <div class="text-right">
+                            <div class="text-2xl font-bold text-blue-600">${country.bowling_average || 'N/A'}</div>
+                            <div class="text-sm text-gray-500">${country.total_runs_conceded} runs / ${country.total_wickets} wickets</div>
+                        </div>
+                    </div>
+                </div>
+            `).join('');
+
+            const html = `
+                <div class="country-card p-6 rounded-lg mb-4">
+                    <h3 class="text-2xl font-bold text-center mb-4 text-gray-800">
+                        ${data.player} Bowling Performance by Country
+                    </h3>
+                    <p class="text-center text-gray-600 mb-6">
+                        Team: <strong>${data.player_team}</strong> | Countries Played In: <strong>${data.total_countries}</strong>
+                    </p>
+                    
+                    <div class="max-h-96 overflow-y-auto">
+                        ${countryStats}
+                    </div>
+                    
+                    <div class="mt-6 text-center">
+                        <p class="text-sm text-gray-500">
+                            Countries are ranked by bowling average (lowest to highest - lower is better)
+                        </p>
+                    </div>
+                </div>
+            `;
+            analysisResults.innerHTML = html;
+        }
+    </script>
+</body>
+</html>
