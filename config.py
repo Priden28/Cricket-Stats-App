@@ -5,12 +5,19 @@ import os
 from datetime import datetime
 from urllib.parse import urlparse
 
+# Debug: Print all environment variables related to database
+print("🔍 Environment Variables Debug:")
+print(f"MYSQL_URL: {os.getenv('MYSQL_URL', 'NOT SET')}")
+print(f"DATABASE_URL: {os.getenv('DATABASE_URL', 'NOT SET')}")
+print(f"DB_HOST: {os.getenv('DB_HOST', 'NOT SET')}")
+
 # Database configuration
 # Railway provides MYSQL_URL in the format: mysql://username:password@host:port/database
-mysql_url = os.getenv("MYSQL_URL")
+mysql_url = os.getenv("MYSQL_URL") or os.getenv("DATABASE_URL")  # Try both common Railway vars
 
 if mysql_url:
     try:
+        print(f"🔗 Found database URL: {mysql_url[:20]}...")  # Only show first 20 chars for security
         url = urlparse(mysql_url)
         DB_CONFIG = {
             'host': url.hostname,
@@ -28,7 +35,7 @@ if mysql_url:
         raise Exception(f"Failed to parse Railway database URL: {e}")
 else:
     # Fallback for local development
-    print("⚠️  No MYSQL_URL found, using local development config")
+    print("⚠️  No MYSQL_URL or DATABASE_URL found, using local development config")
     DB_CONFIG = {
         'host': os.getenv("DB_HOST", "localhost"),
         'user': os.getenv("DB_USER", "root"),
@@ -40,7 +47,7 @@ else:
 
 # Debug output
 print(f"🔧 Final DB Config: host={DB_CONFIG['host']}, user={DB_CONFIG['user']}, database={DB_CONFIG['database']}, port={DB_CONFIG['port']}")
-print(f"🌍 Environment: {'PRODUCTION (Railway)' if mysql_url else 'DEVELOPMENT (Local)'}")
+print(f"🌐 Environment: {'PRODUCTION (Railway)' if mysql_url else 'DEVELOPMENT (Local)'}")
 
 # Team mapping
 TEAM_MAPPING = {
