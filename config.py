@@ -8,42 +8,39 @@ from urllib.parse import urlparse
 # Database configuration
 # Railway provides MYSQL_URL in the format: mysql://username:password@host:port/database
 mysql_url = os.getenv("MYSQL_URL")
-db_url = os.getenv("DATABASE_URL") or mysql_url  # Try both common Railway env vars
 
-if db_url:
+if mysql_url:
     try:
-        url = urlparse(db_url)
+        url = urlparse(mysql_url)
         DB_CONFIG = {
             'host': url.hostname,
             'user': url.username,
             'password': url.password,
-            'database': url.path[1:] if url.path and len(url.path) > 1 else 'railway',  # Default to 'railway' if no database in URL
-            'port': url.port or 3306  # Default MySQL port
+            'database': url.path[1:] if url.path and len(url.path) > 1 else 'railway',
+            'port': url.port or 3306,
+            'ssl_disabled': True,  # Railway MySQL doesn't require SSL
+            'autocommit': True
         }
-        print(f"Using Railway MySQL connection to host: {url.hostname}")
+        print(f"✅ Using Railway MySQL: {url.hostname}:{url.port}/{url.path[1:] if url.path else 'railway'}")
     except Exception as e:
-        print(f"Error parsing database URL: {e}")
-        # Fallback configuration
-        DB_CONFIG = {
-            'host': os.getenv("MYSQL_HOST", "localhost"),
-            'user': os.getenv("MYSQL_USER", "root"),
-            'password': os.getenv("MYSQL_PASSWORD", ""),
-            'database': os.getenv("MYSQL_DATABASE", "railway"),
-            'port': int(os.getenv("MYSQL_PORT", 3306))
-        }
+        print(f"❌ Error parsing MYSQL_URL: {e}")
+        print(f"Raw MYSQL_URL: {mysql_url}")
+        raise Exception(f"Failed to parse Railway database URL: {e}")
 else:
-    # Fallback for local development or if no URL is provided
+    # Fallback for local development
+    print("⚠️  No MYSQL_URL found, using local development config")
     DB_CONFIG = {
-        'host': os.getenv("MYSQL_HOST", os.getenv("DB_HOST", "localhost")),
-        'user': os.getenv("MYSQL_USER", os.getenv("DB_USER", "root")),
-        'password': os.getenv("MYSQL_PASSWORD", os.getenv("DB_PASSWORD", "")),
-        'database': os.getenv("MYSQL_DATABASE", os.getenv("DB_NAME", "railway")),
-        'port': int(os.getenv("MYSQL_PORT", os.getenv("DB_PORT", 3306)))
+        'host': os.getenv("DB_HOST", "localhost"),
+        'user': os.getenv("DB_USER", "root"),
+        'password': os.getenv("DB_PASSWORD", ""),
+        'database': os.getenv("DB_NAME", "cricket_stats"),
+        'port': int(os.getenv("DB_PORT", 3306)),
+        'autocommit': True
     }
-    print("Using fallback MySQL configuration")
 
-# Debug print (remove in production)
-print(f"Database config: host={DB_CONFIG['host']}, user={DB_CONFIG['user']}, database={DB_CONFIG['database']}, port={DB_CONFIG['port']}")
+# Debug output
+print(f"🔧 Final DB Config: host={DB_CONFIG['host']}, user={DB_CONFIG['user']}, database={DB_CONFIG['database']}, port={DB_CONFIG['port']}")
+print(f"🌍 Environment: {'PRODUCTION (Railway)' if mysql_url else 'DEVELOPMENT (Local)'}")
 
 # Team mapping
 TEAM_MAPPING = {
