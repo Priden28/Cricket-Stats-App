@@ -3,14 +3,27 @@ load_dotenv()
 
 import os
 from datetime import datetime
+from urllib.parse import urlparse
 
 # Database configuration
-DB_CONFIG = {
-    'host': os.getenv("DB_HOST", "mysql"),
-    'user': os.getenv("DB_USER", "cricket_user"),
-    'password': os.getenv("DB_PASSWORD"),
-    'database': os.getenv("DB_NAME", "cricket_stats")
-}
+db_url = os.getenv("MYSQL_URL") # Use the Railway provided URL
+if db_url:
+    url = urlparse(db_url)
+    DB_CONFIG = {
+        'host': url.hostname,
+        'user': url.username,
+        'password': url.password,
+        'database': url.path[1:],
+        'port': url.port
+    }
+else:
+    # Fallback for local development
+    DB_CONFIG = {
+        'host': os.getenv("DB_HOST", "mysql"),
+        'user': os.getenv("DB_USER", "cricket_user"),
+        'password': os.getenv("DB_PASSWORD"),
+        'database': os.getenv("DB_NAME", "cricket_stats")
+    }
 
 # Team mapping
 TEAM_MAPPING = {
