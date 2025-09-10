@@ -45,17 +45,17 @@ TEAM_MAPPING = {
 DATASET_CONFIGS = {
     'team': {
         'min_columns': 11,
-        'columns': ["Team", "ScoreDescending", "Overs", "RPO", "Lead", "Inns", 
+        'columns': ["Team", "ScoreDescending", "Overs", "RPO", "Lead", "Inns",
                    "Result", "", "Opposition", "Ground", "Start Date"]
     },
     'batting': {
         'min_columns': 12,
-        'columns': ["Player", "RunsDescending", "Mins", "BF", "4s", "6s", "SR", 
+        'columns': ["Player", "RunsDescending", "Mins", "BF", "4s", "6s", "SR",
                    "Inns", "", "Opposition", "Ground", "Start Date"]
     },
     'bowling': {
         'min_columns': 12,
-        'columns': ["Player", "Overs", "Mdns", "Runs", "WktsDescending", "Econ", 
+        'columns': ["Player", "Overs", "Mdns", "Runs", "WktsDescending", "Econ",
                    "Inns", "", "Opposition", "Ground", "Start Date"]
     }
 }
