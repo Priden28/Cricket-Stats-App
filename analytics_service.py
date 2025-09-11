@@ -25,7 +25,9 @@ class AnalyticsService:
             self.match_id_dict = {}
 
         def generate_match_id(self, row):
-            match_info = f"{row['Ground']}_{row['Start Date']}"
+            # Extract only the date part to ignore time component
+            start_date = pd.to_datetime(row['Start Date']).strftime('%Y-%m-%d')
+            match_info = f"{row['Ground']}_{start_date}"
             match_id = hashlib.sha256(match_info.encode()).hexdigest()
             self.match_id_dict[match_id] = (row['Ground'], row['Start Date'])
             return match_id
@@ -668,112 +670,16 @@ class AnalyticsService:
                     rangeslider=dict(visible=False),
                     type='linear'  # Ensure year is treated as continuous numeric
                 ),
-                yaxis=dict(showgrid=True)
-            )
-
-            # Return the figure as a JSON object
-            return fig.to_json()
-
-        except Exception as e:
-            logger.error(f"Error generating batting plot for player {player_name}: {e}")
-            return None
-
-    def generate_player_bowling_average_plot(self, player_name):
-        """
-        Generates a Plotly line chart for a player's cumulative bowling performance.
-        Returns the figure as a JSON object.
-        """
-        try:
-            logger.info(f"Generating bowling plot for player: {player_name}")
-            _, _, df_bowling = self.process_data(*self.fetch_data_from_db())
-
-            # Check if player exists
-            if player_name not in df_bowling['Player'].values:
-                available_players = df_bowling['Player'].unique()
-                logger.error(f"Player '{player_name}' not found in bowling data. Available players: {available_players[:10]}")
-                return None
-
-            # Calculate yearly bowling statistics - using the corrected logic
-            df_bowling['Year'] = df_bowling['Start Date'].dt.year
-            df_avg_bowling = df_bowling.groupby(['Player', 'Year']).apply(lambda group: pd.Series({
-                'Total Runs Conceded': group['Runs'].sum(),
-                'Total Wickets Taken': group['WktsDescending'].sum(),
-                'Matches Played': group['NumericMatchID'].nunique(),
-                'Best Bowling Figures': group.sort_values(by=['WktsDescending', 'Runs'], ascending=[False, True]).iloc[0]['WktsDescending'].astype(int).astype(str) + "-" + group.sort_values(by=['WktsDescending', 'Runs'], ascending=[False, True]).iloc[0]['Runs'].astype(int).astype(str)
-            })).reset_index()
-
-            logger.info(f"Generated yearly bowling stats with {len(df_avg_bowling)} rows")
-
-            # Initialize columns for cumulative statistics
-            df_avg_bowling['Cumulative Runs Conceded'] = 0
-            df_avg_bowling['Cumulative Wickets Taken'] = 0
-            df_avg_bowling['Cumulative Matches Played'] = 0
-            df_avg_bowling['Cumulative Best Bowling Figures'] = "0-0"
-            df_avg_bowling['Cumulative Bowling Average'] = 0.0
-
-            # Calculate cumulative values manually to maintain state across years
-            for player in df_avg_bowling['Player'].unique():
-                player_data = df_avg_bowling[df_avg_bowling['Player'] == player].sort_values('Year')
-                cum_runs = cum_wickets = cum_matches = 0
-                best_figures = "0-0"
-                
-                for index, row in player_data.iterrows():
-                    cum_runs += row['Total Runs Conceded']
-                    cum_wickets += row['Total Wickets Taken']
-                    cum_matches += row['Matches Played']
-                    
-                    # Update best bowling figures if the new one is better
-                    if int(row['Best Bowling Figures'].split("-")[0]) > int(best_figures.split("-")[0]) or (int(row['Best Bowling Figures'].split("-")[0]) == int(best_figures.split("-")[0]) and int(row['Best Bowling Figures'].split("-")[1]) < int(best_figures.split("-")[1])):
-                        best_figures = row['Best Bowling Figures']
-                    
-                    # Update cumulative statistics
-                    df_avg_bowling.loc[index, 'Cumulative Runs Conceded'] = cum_runs
-                    df_avg_bowling.loc[index, 'Cumulative Wickets Taken'] = cum_wickets
-                    df_avg_bowling.loc[index, 'Cumulative Matches Played'] = cum_matches
-                    df_avg_bowling.loc[index, 'Cumulative Best Bowling Figures'] = best_figures
-                    
-                    # Calculate cumulative bowling average if there are wickets taken
-                    if cum_wickets > 0:
-                        df_avg_bowling.loc[index, 'Cumulative Bowling Average'] = cum_runs / cum_wickets
-                    else:
-                        df_avg_bowling.loc[index, 'Cumulative Bowling Average'] = 0
-
-            # Filter DataFrame for the specified player
-            df_player_bowling = df_avg_bowling[df_avg_bowling['Player'] == player_name]
-
-            if df_player_bowling.empty:
-                logger.error(f"No yearly bowling stats found for player: {player_name}")
-                return None
-
-            logger.info(f"Found {len(df_player_bowling)} years of bowling data for player: {player_name}")
-
-            # Plot the cumulative bowling performance vs. years using Plotly Express
-            fig = px.line(df_player_bowling, x='Year', y='Cumulative Bowling Average',
-                          hover_data={'Cumulative Runs Conceded': True, 'Cumulative Wickets Taken': True, 'Cumulative Matches Played': True, 'Cumulative Best Bowling Figures': True},
-                          title=f'{player_name} Cumulative Bowling Performance Over the Years',
-                          labels={'Cumulative Bowling Average': 'Cumulative Bowling Average', 'Year': 'Year'})
-
-            # Fix for hover issue on last point - ensure all data points are properly accessible
-            fig.update_traces(
-                mode='lines+markers',
-                marker=dict(size=4),
-                line=dict(width=2)
-            )
-            
-            # Improve hover behavior
-            fig.update_layout(
-                hovermode='x unified',
-                xaxis=dict(
+                yaxis=dict(
                     showgrid=True,
-                    rangeslider=dict(visible=False),
-                    type='linear'  # Ensure year is treated as continuous numeric
+                    title='Cumulative Batting Average'
                 ),
-                yaxis=dict(showgrid=True)
+                showlegend=False
             )
 
-            # Return the figure as a JSON object
+            logger.info(f"Successfully generated plot for {player_name}")
             return fig.to_json()
 
         except Exception as e:
-            logger.error(f"Error generating bowling plot for player {player_name}: {e}")
+            logger.error(f"Error generating plot for {player_name}: {e}")
             return None

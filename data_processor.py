@@ -46,8 +46,7 @@ class DataProcessor:
     
     def clean_opposition_column(self, dataframe):
         """Clean the Opposition column by removing 'v' prefix"""
-        if 'Opposition' in dataframe.columns:
-            dataframe['Opposition'] = dataframe['Opposition'].str.replace('^v', '', regex=True)
+        dataframe['Opposition'] = dataframe['Opposition'].str.replace('^v', '', regex=True)
         return dataframe
     
     def split_player_and_team(self, dataframe, team_mapping):
@@ -96,19 +95,15 @@ class DataProcessor:
     def process_overs_column(self, dataframe, column_name='Overs'):
         """Convert overs format (5.2 means 5 overs and 2 balls) to float"""
         def convert_overs_to_float(overs):
-            try:
-                if isinstance(overs, str):
-                    overs = overs.strip()
-                    if '.' in overs:
-                        overs_parts = overs.split('.')
-                        overs_in_float = int(overs_parts[0]) + (int(overs_parts[1]) / 6)
-                        return overs_in_float
-                    else:
-                        return float(overs)
-                return float(overs)
-            except (ValueError, TypeError):
-                logger.warning(f"Could not convert overs value: {overs}")
-                return 0.0
+            if isinstance(overs, str):
+                overs = overs.strip()
+                if '.' in overs:
+                    overs_parts = overs.split('.')
+                    overs_in_float = int(overs_parts[0]) + (int(overs_parts[1]) / 6)
+                    return overs_in_float
+                else:
+                    return float(overs)
+            return float('nan')
 
         dataframe[column_name] = dataframe[column_name].apply(convert_overs_to_float)
         return dataframe
@@ -117,59 +112,49 @@ class DataProcessor:
         """Process and store team data in the database"""
         logger.info(f"Starting to process team data with {len(scraped_data)} scraped rows")
         
-        if not scraped_data:
-            logger.warning("No scraped data provided for team processing")
-            return pd.DataFrame()
+        cleaned_data = self.clean_data(scraped_data, len(columns))
+        df = self.convert_to_dataframe(cleaned_data, columns)
+        df = self.clean_opposition_column(df)
+        df = self.process_team_score(df)
+        df = self.process_overs_column(df, column_name='Overs')
         
-        try:
-            cleaned_data = self.clean_data(scraped_data, len(columns))
-            if len(cleaned_data) == 0:
-                logger.warning("No data left after cleaning")
-                return pd.DataFrame()
-                
-            df = self.convert_to_dataframe(cleaned_data, columns)
-            df = self.clean_opposition_column(df)
-            df = self.process_team_score(df)
-            df = self.process_overs_column(df, column_name='Overs')
-            
-            # Convert data types with error handling
-            try:
-                df['RPO'] = pd.to_numeric(df['RPO'], errors='coerce').fillna(0.0)
-                df['Inns'] = pd.to_numeric(df['Inns'], errors='coerce').fillna(1).astype(int)
-                df['Lead'] = pd.to_numeric(df['Lead'], errors='coerce').fillna(0).astype(int)
-                df['Start Date'] = pd.to_datetime(df['Start Date'], errors='coerce')
-            except Exception as e:
-                logger.error(f"Error converting data types: {e}")
-                return df
-            
-            # Log the final DataFrame structure
-            logger.info(f"Final DataFrame columns: {list(df.columns)}")
-            logger.info(f"DataFrame shape: {df.shape}")
-            
-            # Insert data into database
-            inserted_count = self._insert_team_data_to_db(df)
-            
-            logger.info(f"Team data processing complete: {inserted_count} rows inserted")
-            return df
-            
-        except Exception as e:
-            logger.error(f"Error processing team data: {e}")
-            return pd.DataFrame()
-    
-    def _insert_team_data_to_db(self, df):
-        """Insert team data into database with improved error handling"""
+        # Convert data types like in original code
+        df['RPO'] = df['RPO'].astype(float)
+        df['Inns'] = df['Inns'].astype(int)
+        df['Lead'] = df['Lead'].fillna(0).astype(int)
+        df['Start Date'] = pd.to_datetime(df['Start Date'], errors='coerce')
+        
+        # Log the final DataFrame structure
+        logger.info(f"Final DataFrame columns: {list(df.columns)}")
+        logger.info(f"DataFrame shape: {df.shape}")
+        
         inserted_count = 0
         duplicate_count = 0
         error_count = 0
         
+        # Get fresh connection for insertion
+        try:
+            connection, cursor = self.db_manager.get_connection()
+            logger.info("Got database connection for team data insertion")
+        except Exception as e:
+            logger.error(f"Failed to get database connection: {e}")
+            return df
+        
         for index, row in df.iterrows():
             try:
-                # Check if row exists
+                # Check if row exists with fresh connection check
+                connection, cursor = self.db_manager.get_connection()  # Refresh connection
+                
                 if not self.db_manager.row_exists_team(
                     row['Team'], row['ScoreDescending'], row['Ground'], row['Start Date']
                 ):
-                    # Prepare data tuple
-                    row_data = (
+                    # Insert single row
+                    query = """
+                    INSERT INTO team (`Team`, `ScoreDescending`, `Overs`, `RPO`, `Lead`, `Inns`, 
+                                    `Result`, `Opposition`, `Ground`, `Start Date`, `Declared`, `Wickets`)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    """
+                    cursor.execute(query, (
                         row['Team'],
                         row['ScoreDescending'],
                         row['Overs'],
@@ -182,13 +167,11 @@ class DataProcessor:
                         row['Start Date'],
                         row['Declared'],
                         row['Wickets']
-                    )
-                    
-                    # Insert using database manager method
-                    self.db_manager.insert_team_record(row_data)
+                    ))
+                    connection.commit()
                     inserted_count += 1
                     
-                    if inserted_count % 10 == 0:
+                    if inserted_count % 10 == 0:  # Log every 10 insertions
                         logger.info(f"Inserted {inserted_count} team records so far...")
                 else:
                     duplicate_count += 1
@@ -196,79 +179,76 @@ class DataProcessor:
             except Exception as e:
                 error_count += 1
                 logger.error(f"Error inserting team row {index}: {e}")
+                logger.error(f"Row data: {dict(row)}")
+                
+                # Try to rollback and continue
+                try:
+                    connection.rollback()
+                except:
+                    pass
                 continue
         
-        logger.info(f"Team insertion summary - Inserted: {inserted_count}, Duplicates: {duplicate_count}, Errors: {error_count}")
-        return inserted_count
+        logger.info(f"Team data processing complete:")
+        logger.info(f"  - Inserted: {inserted_count} new rows")
+        logger.info(f"  - Duplicates skipped: {duplicate_count}")
+        logger.info(f"  - Errors: {error_count}")
+        logger.info(f"  - Total processed: {len(df)}")
+        
+        return df
 
     def process_batting_data(self, scraped_data, columns):
         """Process and store batting data in the database"""
         logger.info(f"Starting to process batting data with {len(scraped_data)} scraped rows")
         
-        if not scraped_data:
-            logger.warning("No scraped data provided for batting processing")
-            return pd.DataFrame()
+        cleaned_data = self.clean_data(scraped_data, len(columns))
+        df = self.convert_to_dataframe(cleaned_data, columns)
+        df = self.clean_opposition_column(df)
+        df = self.split_player_and_team(df, TEAM_MAPPING)
         
-        try:
-            cleaned_data = self.clean_data(scraped_data, len(columns))
-            if len(cleaned_data) == 0:
-                logger.warning("No data left after cleaning")
-                return pd.DataFrame()
-                
-            df = self.convert_to_dataframe(cleaned_data, columns)
-            df = self.clean_opposition_column(df)
-            df = self.split_player_and_team(df, TEAM_MAPPING)
-            
-            # Clean and convert data like in original code
-            df = df[~df['RunsDescending'].isin(['DNB', 'absent', 'sub'])]
-            df['Not Out'] = df['RunsDescending'].apply(lambda x: 1 if '*' in str(x) else 0)
-            df['RunsDescending'] = df['RunsDescending'].str.replace('*', '', regex=False)
-            
-            # Remove Mins column if it exists
-            if 'Mins' in df.columns:
-                df = df.drop(columns=['Mins'])
-            
-            # Convert data types with error handling
-            try:
-                df['RunsDescending'] = pd.to_numeric(df['RunsDescending'], errors='coerce').fillna(0).astype(int)
-                df['4s'] = pd.to_numeric(df['4s'], errors='coerce').fillna(0).astype(int)
-                df['6s'] = pd.to_numeric(df['6s'], errors='coerce').fillna(0).astype(int)
-                df['BF'] = pd.to_numeric(df['BF'], errors='coerce').fillna(0).astype(int)
-                df['Inns'] = pd.to_numeric(df['Inns'], errors='coerce').fillna(1).astype(int)
-                df['SR'] = pd.to_numeric(df['SR'].str.strip().replace('-', '0'), errors='coerce').fillna(0.0)
-                df['Start Date'] = pd.to_datetime(df['Start Date'], errors='coerce')
-            except Exception as e:
-                logger.error(f"Error converting batting data types: {e}")
-                return df
-            
-            # Log the final DataFrame structure
-            logger.info(f"Final batting DataFrame columns: {list(df.columns)}")
-            logger.info(f"Batting DataFrame shape: {df.shape}")
-            
-            # Insert data into database
-            inserted_count = self._insert_batting_data_to_db(df)
-            
-            logger.info(f"Batting data processing complete: {inserted_count} rows inserted")
-            return df
-            
-        except Exception as e:
-            logger.error(f"Error processing batting data: {e}")
-            return pd.DataFrame()
-    
-    def _insert_batting_data_to_db(self, df):
-        """Insert batting data into database with improved error handling"""
+        # Clean and convert data like in original code
+        df = df[~df['RunsDescending'].isin(['DNB', 'absent', 'sub'])]
+        df['Not Out'] = df['RunsDescending'].apply(lambda x: 1 if '*' in str(x) else 0)
+        df['RunsDescending'] = df['RunsDescending'].str.replace('*', '', regex=False)
+        df = df.drop(columns=['Mins'])
+        df['RunsDescending'] = df['RunsDescending'].astype(int)
+        df['4s'] = df['4s'].astype(int)
+        df['6s'] = df['6s'].astype(int)
+        df['BF'] = df['BF'].astype(int)
+        df['Inns'] = df['Inns'].astype(int)
+        df['SR'] = df['SR'].str.strip().replace('-', '0').astype(float)
+        df['Start Date'] = pd.to_datetime(df['Start Date'], errors='coerce')
+        
+        # Log the final DataFrame structure
+        logger.info(f"Final batting DataFrame columns: {list(df.columns)}")
+        logger.info(f"Batting DataFrame shape: {df.shape}")
+        
         inserted_count = 0
         duplicate_count = 0
         error_count = 0
         
+        # Get fresh connection for insertion
+        try:
+            connection, cursor = self.db_manager.get_connection()
+            logger.info("Got database connection for batting data insertion")
+        except Exception as e:
+            logger.error(f"Failed to get database connection: {e}")
+            return df
+        
         for index, row in df.iterrows():
             try:
-                # Check if row exists
+                # Check if row exists with fresh connection check
+                connection, cursor = self.db_manager.get_connection()  # Refresh connection
+                
                 if not self.db_manager.row_exists_batting(
                     row['Player'], row['RunsDescending'], row['Ground'], row['Start Date']
                 ):
-                    # Prepare data tuple
-                    row_data = (
+                    # Insert single row
+                    query = """
+                    INSERT INTO batting (`Player`, `RunsDescending`, `BF`, `4s`, `6s`, `SR`, `Inns`,
+                                       `Opposition`, `Ground`, `Start Date`, `Not Out`, `Team`)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    """
+                    cursor.execute(query, (
                         row['Player'],
                         row['RunsDescending'],
                         row['BF'],
@@ -281,13 +261,11 @@ class DataProcessor:
                         row['Start Date'],
                         row['Not Out'],
                         row['Team']
-                    )
-                    
-                    # Insert using database manager method
-                    self.db_manager.insert_batting_record(row_data)
+                    ))
+                    connection.commit()
                     inserted_count += 1
                     
-                    if inserted_count % 10 == 0:
+                    if inserted_count % 10 == 0:  # Log every 10 insertions
                         logger.info(f"Inserted {inserted_count} batting records so far...")
                 else:
                     duplicate_count += 1
@@ -295,78 +273,82 @@ class DataProcessor:
             except Exception as e:
                 error_count += 1
                 logger.error(f"Error inserting batting row {index}: {e}")
+                logger.error(f"Row data: {dict(row)}")
+                
+                # Try to rollback and continue
+                try:
+                    connection.rollback()
+                except:
+                    pass
                 continue
         
-        logger.info(f"Batting insertion summary - Inserted: {inserted_count}, Duplicates: {duplicate_count}, Errors: {error_count}")
-        return inserted_count
+        logger.info(f"Batting data processing complete:")
+        logger.info(f"  - Inserted: {inserted_count} new rows")
+        logger.info(f"  - Duplicates skipped: {duplicate_count}")
+        logger.info(f"  - Errors: {error_count}")
+        logger.info(f"  - Total processed: {len(df)}")
+        
+        return df
 
     def process_bowling_data(self, scraped_data, columns):
         """Process and store bowling data in the database"""
         logger.info(f"Starting to process bowling data with {len(scraped_data)} scraped rows")
         
-        if not scraped_data:
-            logger.warning("No scraped data provided for bowling processing")
-            return pd.DataFrame()
+        cleaned_data = self.clean_data(scraped_data, len(columns))
+        df = self.convert_to_dataframe(cleaned_data, columns)
+        df = self.clean_opposition_column(df)
+        df = self.split_player_and_team(df, TEAM_MAPPING)
         
+        # Clean and convert data like in original code - FILTER OUT DNB/absent FIRST
+        df = df[~df['WktsDescending'].isin(['DNB', 'absent', 'sub'])]
+        # Also filter out DNB from Overs column before processing
+        df = df[~df['Overs'].isin(['DNB', 'absent', 'sub'])]
+        df = self.process_overs_column(df, column_name='Overs')
+        
+        # Handle Inns column more carefully
         try:
-            cleaned_data = self.clean_data(scraped_data, len(columns))
-            if len(cleaned_data) == 0:
-                logger.warning("No data left after cleaning")
-                return pd.DataFrame()
-                
-            df = self.convert_to_dataframe(cleaned_data, columns)
-            df = self.clean_opposition_column(df)
-            df = self.split_player_and_team(df, TEAM_MAPPING)
-            
-            # Clean and convert data like in original code - FILTER OUT DNB/absent FIRST
-            df = df[~df['WktsDescending'].isin(['DNB', 'absent', 'sub'])]
-            # Also filter out DNB from Overs column before processing
-            df = df[~df['Overs'].isin(['DNB', 'absent', 'sub'])]
-            df = self.process_overs_column(df, column_name='Overs')
-            
-            # Convert data types with error handling
-            try:
-                # Handle Inns column more carefully
-                df['Inns'] = df['Inns'].apply(lambda x: int(str(x).split()[0]) if str(x).split()[0].isdigit() else 1)
-                
-                df['Mdns'] = pd.to_numeric(df['Mdns'].replace('-', '0'), errors='coerce').fillna(0).astype(int)
-                df['Runs'] = pd.to_numeric(df['Runs'].replace('-', '0'), errors='coerce').fillna(0).astype(int)
-                df['WktsDescending'] = pd.to_numeric(df['WktsDescending'].replace('-', '0'), errors='coerce').fillna(0).astype(int)
-                df['Econ'] = pd.to_numeric(df['Econ'].replace('-', '0'), errors='coerce').fillna(0.0)
-                df['Start Date'] = pd.to_datetime(df['Start Date'], errors='coerce')
-            except Exception as e:
-                logger.error(f"Error converting bowling data types: {e}")
-                return df
+            df['Inns'] = df['Inns'].astype(int)
+        except (ValueError, TypeError):
+            df['Inns'] = df['Inns'].apply(lambda x: int(str(x).split()[0]) if str(x).split()[0].isdigit() else 1)
+        
+        df['Mdns'] = df['Mdns'].replace('-', '0').astype(int)
+        df['Runs'] = df['Runs'].replace('-', '0').astype(int)
+        df['WktsDescending'] = df['WktsDescending'].replace('-', '0').astype(int)
+        df['Econ'] = df['Econ'].replace('-', '0').astype(float)
+        df['Start Date'] = pd.to_datetime(df['Start Date'], errors='coerce')
 
-            # Log the final DataFrame structure
-            logger.info(f"Final bowling DataFrame columns: {list(df.columns)}")
-            logger.info(f"Bowling DataFrame shape: {df.shape}")
+        # Log the final DataFrame structure
+        logger.info(f"Final bowling DataFrame columns: {list(df.columns)}")
+        logger.info(f"Bowling DataFrame shape: {df.shape}")
 
-            # Insert data into database
-            inserted_count = self._insert_bowling_data_to_db(df)
-            
-            logger.info(f"Bowling data processing complete: {inserted_count} rows inserted")
-            return df
-            
-        except Exception as e:
-            logger.error(f"Error processing bowling data: {e}")
-            return pd.DataFrame()
-    
-    def _insert_bowling_data_to_db(self, df):
-        """Insert bowling data into database with improved error handling"""
         inserted_count = 0
         duplicate_count = 0
         error_count = 0
         
+        # Get fresh connection for insertion
+        try:
+            connection, cursor = self.db_manager.get_connection()
+            logger.info("Got database connection for bowling data insertion")
+        except Exception as e:
+            logger.error(f"Failed to get database connection: {e}")
+            return df
+        
         for index, row in df.iterrows():
             try:
-                # Check if row exists
+                # Check if row exists with fresh connection check
+                connection, cursor = self.db_manager.get_connection()  # Refresh connection
+                
                 if not self.db_manager.row_exists_bowling(
                     row['Player'], row['Overs'], row['Mdns'], row['Runs'], 
                     row['WktsDescending'], row['Ground'], row['Start Date']
                 ):
-                    # Prepare data tuple
-                    row_data = (
+                    # Insert single row
+                    query = """
+                    INSERT INTO bowling (`Player`, `Overs`, `Mdns`, `Runs`, `WktsDescending`, `Econ`,
+                                       `Inns`, `Opposition`, `Ground`, `Start Date`, `Team`)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    """
+                    cursor.execute(query, (
                         row['Player'],
                         row['Overs'],
                         row['Mdns'],
@@ -378,13 +360,11 @@ class DataProcessor:
                         row['Ground'],
                         row['Start Date'],
                         row['Team']
-                    )
-                    
-                    # Insert using database manager method
-                    self.db_manager.insert_bowling_record(row_data)
+                    ))
+                    connection.commit()
                     inserted_count += 1
                     
-                    if inserted_count % 10 == 0:
+                    if inserted_count % 10 == 0:  # Log every 10 insertions
                         logger.info(f"Inserted {inserted_count} bowling records so far...")
                 else:
                     duplicate_count += 1
@@ -392,7 +372,19 @@ class DataProcessor:
             except Exception as e:
                 error_count += 1
                 logger.error(f"Error inserting bowling row {index}: {e}")
+                logger.error(f"Row data: {dict(row)}")
+                
+                # Try to rollback and continue
+                try:
+                    connection.rollback()
+                except:
+                    pass
                 continue
         
-        logger.info(f"Bowling insertion summary - Inserted: {inserted_count}, Duplicates: {duplicate_count}, Errors: {error_count}")
-        return inserted_count
+        logger.info(f"Bowling data processing complete:")
+        logger.info(f"  - Inserted: {inserted_count} new rows")
+        logger.info(f"  - Duplicates skipped: {duplicate_count}")
+        logger.info(f"  - Errors: {error_count}")
+        logger.info(f"  - Total processed: {len(df)}")
+        
+        return df
