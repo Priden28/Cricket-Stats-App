@@ -41,14 +41,24 @@ class WebScraper:
         options.binary_location = CHROME_BINARY_LOCATION
         options.add_experimental_option('excludeSwitches', ['enable-logging'])
         
-        self.driver = webdriver.Chrome(options=options)
-        return self.driver
+        try:
+            self.driver = webdriver.Chrome(options=options)
+            # Set page load timeout
+            self.driver.set_page_load_timeout(30)
+            # Set implicit wait
+            self.driver.implicitly_wait(10)
+            logger.info("WebDriver initialized successfully")
+            return self.driver
+        except Exception as e:
+            logger.error(f"Failed to initialize WebDriver: {e}")
+            raise
     
     def scrape_current_page_data(self):
         """Scrape table data from the current page"""
         try:
-            wait = WebDriverWait(self.driver, 10)
+            wait = WebDriverWait(self.driver, 15)
             table = wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "table")))
+            logger.info("Table found on current page")
         except Exception as e:
             logger.error(f"Error locating table: {e}")
             return []
@@ -69,44 +79,52 @@ class WebScraper:
     def has_next_button(self):
         """Check if there's a Next button available and clickable"""
         try:
-            # Look for the Next button using different strategies
-            next_selectors = [
-                "a[title='Next']",  # Link with title="Next"
-                "input[value='Next']",  # Input button with value="Next"
-                "a[href*='page=']",  # Link with page parameter
-                "a.paging",  # Paging class links
-                ".paging a"  # Links within paging section
-            ]
+            # Wait a bit for the page to fully load
+            time.sleep(1)
             
-            # Try CSS selectors first
-            for selector in next_selectors:
-                try:
-                    elements = self.driver.find_elements(By.CSS_SELECTOR, selector)
-                    for element in elements:
-                        if element.is_enabled() and element.is_displayed():
-                            # Check if text contains "Next" (case insensitive)
-                            if "next" in element.text.lower() or element.get_attribute("title") and "next" in element.get_attribute("title").lower():
-                                return element
-                except NoSuchElementException:
-                    continue
+            # Based on the screenshot, look for the "Next" link specifically
+            # Try multiple strategies to find the Next button
             
-            # Try finding by partial link text
+            # Strategy 1: Look for link with text "Next"
             try:
-                element = self.driver.find_element(By.PARTIAL_LINK_TEXT, "Next")
-                if element.is_enabled() and element.is_displayed():
-                    return element
+                next_link = self.driver.find_element(By.LINK_TEXT, "Next")
+                if next_link.is_enabled() and next_link.is_displayed():
+                    logger.info("Found Next button using LINK_TEXT")
+                    return next_link
             except NoSuchElementException:
                 pass
             
-            # Try finding all links and check their text
+            # Strategy 2: Look for link with partial text "Next"
             try:
-                all_links = self.driver.find_elements(By.TAG_NAME, "a")
-                for link in all_links:
-                    if link.text and "next" in link.text.lower() and link.is_enabled() and link.is_displayed():
+                next_link = self.driver.find_element(By.PARTIAL_LINK_TEXT, "Next")
+                if next_link.is_enabled() and next_link.is_displayed():
+                    logger.info("Found Next button using PARTIAL_LINK_TEXT")
+                    return next_link
+            except NoSuchElementException:
+                pass
+            
+            # Strategy 3: Look for any clickable element containing "Next"
+            try:
+                elements = self.driver.find_elements(By.XPATH, "//*[contains(text(),'Next')]")
+                for element in elements:
+                    if element.is_enabled() and element.is_displayed() and element.tag_name in ['a', 'button', 'input']:
+                        logger.info(f"Found Next button using XPath on {element.tag_name}")
+                        return element
+            except NoSuchElementException:
+                pass
+            
+            # Strategy 4: Look for pagination links (the page shows navigation at bottom)
+            try:
+                # Look for links in pagination area
+                pagination_links = self.driver.find_elements(By.XPATH, "//a[contains(@href, 'page=') or contains(text(), 'Next')]")
+                for link in pagination_links:
+                    if link.is_enabled() and link.is_displayed() and 'next' in link.text.lower():
+                        logger.info("Found Next button in pagination area")
                         return link
             except Exception:
                 pass
                 
+            logger.info("No Next button found - likely on last page")
             return None
             
         except Exception as e:
@@ -119,22 +137,31 @@ class WebScraper:
         if next_button:
             try:
                 # Scroll to the button to ensure it's visible
-                self.driver.execute_script("arguments[0].scrollIntoView(true);", next_button)
+                self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", next_button)
                 time.sleep(1)  # Brief pause after scrolling
+                
+                # Get current URL to compare after click
+                current_url = self.driver.current_url
                 
                 # Try clicking the button
                 next_button.click()
+                logger.info("Clicked Next button")
                 
-                # Wait for the page to load
-                time.sleep(2)
+                # Wait for the page to change
+                time.sleep(3)
                 
-                # Wait for the table to be present on the new page
-                WebDriverWait(self.driver, 10).until(
-                    EC.presence_of_element_located((By.CSS_SELECTOR, "table"))
-                )
-                
-                logger.info("Successfully clicked Next button and loaded new page")
-                return True
+                # Check if URL changed or wait for new content
+                try:
+                    # Wait for either URL change or table to reload
+                    WebDriverWait(self.driver, 15).until(
+                        lambda driver: driver.current_url != current_url or
+                        EC.presence_of_element_located((By.CSS_SELECTOR, "table"))
+                    )
+                    logger.info("Successfully navigated to next page")
+                    return True
+                except TimeoutException:
+                    logger.warning("Page didn't change after clicking Next - might be on last page")
+                    return False
                 
             except Exception as e:
                 logger.error(f"Error clicking Next button: {e}")
@@ -149,13 +176,20 @@ class WebScraper:
             self.initialize_driver()
         
         try:
+            logger.info(f"Loading URL: {url}")
             self.driver.get(url)
-            logger.info(f"Loaded initial URL: {url}")
+            
+            # Wait for initial page to load completely
+            WebDriverWait(self.driver, 20).until(
+                EC.presence_of_element_located((By.CSS_SELECTOR, "table"))
+            )
+            logger.info(f"Initial page loaded successfully")
             
             all_data = []
             page_number = 1
+            max_pages = 50  # Safety limit to prevent infinite loops
             
-            while True:
+            while page_number <= max_pages:
                 logger.info(f"Scraping page {page_number}")
                 
                 # Scrape current page data
@@ -164,12 +198,22 @@ class WebScraper:
                 
                 logger.info(f"Page {page_number}: scraped {len(page_data)} rows, total so far: {len(all_data)}")
                 
+                # If no data on current page, might be an issue
+                if not page_data:
+                    logger.warning(f"No data found on page {page_number}")
+                    break
+                
                 # Try to go to next page
                 if self.click_next_button():
                     page_number += 1
+                    # Small delay between pages
+                    time.sleep(2)
                 else:
                     logger.info(f"Finished scraping. Total pages: {page_number}, Total rows: {len(all_data)}")
                     break
+            
+            if page_number > max_pages:
+                logger.warning(f"Reached maximum page limit ({max_pages})")
             
             return all_data
             
@@ -208,6 +252,10 @@ class WebScraper:
     def close(self):
         """Close the WebDriver"""
         if self.driver:
-            self.driver.quit()
-            self.driver = None
-            logger.info("WebDriver closed")
+            try:
+                self.driver.quit()
+                logger.info("WebDriver closed successfully")
+            except Exception as e:
+                logger.error(f"Error closing WebDriver: {e}")
+            finally:
+                self.driver = None
