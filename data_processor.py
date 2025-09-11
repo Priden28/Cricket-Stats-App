@@ -108,6 +108,24 @@ class DataProcessor:
         dataframe[column_name] = dataframe[column_name].apply(convert_overs_to_float)
         return dataframe
     
+    def normalize_start_date(self, date_value):
+        """Normalize Start Date to date only (strip time component)"""
+        if pd.isna(date_value):
+            return None
+        
+        if isinstance(date_value, str):
+            try:
+                # Parse the datetime string and extract only the date part
+                dt = pd.to_datetime(date_value)
+                return dt.date()
+            except:
+                return None
+        elif hasattr(date_value, 'date'):
+            # If it's already a datetime object, extract the date
+            return date_value.date()
+        else:
+            return date_value
+    
     def process_team_data(self, scraped_data, columns):
         """Process and store team data in the database"""
         logger.info(f"Starting to process team data with {len(scraped_data)} scraped rows")
@@ -124,6 +142,9 @@ class DataProcessor:
         df['Lead'] = df['Lead'].fillna(0).astype(int)
         df['Start Date'] = pd.to_datetime(df['Start Date'], errors='coerce')
         
+        # Normalize Start Date to remove time component
+        df['Start Date'] = df['Start Date'].apply(self.normalize_start_date)
+        
         # Log the final DataFrame structure
         logger.info(f"Final DataFrame columns: {list(df.columns)}")
         logger.info(f"DataFrame shape: {df.shape}")
@@ -132,18 +153,11 @@ class DataProcessor:
         duplicate_count = 0
         error_count = 0
         
-        # Get fresh connection for insertion
-        try:
-            connection, cursor = self.db_manager.get_connection()
-            logger.info("Got database connection for team data insertion")
-        except Exception as e:
-            logger.error(f"Failed to get database connection: {e}")
-            return df
-        
+        # Process each row individually
         for index, row in df.iterrows():
             try:
-                # Check if row exists with fresh connection check
-                connection, cursor = self.db_manager.get_connection()  # Refresh connection
+                # Get fresh connection for each check and insert
+                connection, cursor = self.db_manager.get_connection()
                 
                 if not self.db_manager.row_exists_team(
                     row['Team'], row['ScoreDescending'], row['Ground'], row['Start Date']
@@ -175,6 +189,7 @@ class DataProcessor:
                         logger.info(f"Inserted {inserted_count} team records so far...")
                 else:
                     duplicate_count += 1
+                    logger.debug(f"Duplicate team record skipped: {row['Team']} - {row['ScoreDescending']} at {row['Ground']}")
                     
             except Exception as e:
                 error_count += 1
@@ -218,6 +233,9 @@ class DataProcessor:
         df['SR'] = df['SR'].str.strip().replace('-', '0').astype(float)
         df['Start Date'] = pd.to_datetime(df['Start Date'], errors='coerce')
         
+        # Normalize Start Date to remove time component
+        df['Start Date'] = df['Start Date'].apply(self.normalize_start_date)
+        
         # Log the final DataFrame structure
         logger.info(f"Final batting DataFrame columns: {list(df.columns)}")
         logger.info(f"Batting DataFrame shape: {df.shape}")
@@ -226,18 +244,11 @@ class DataProcessor:
         duplicate_count = 0
         error_count = 0
         
-        # Get fresh connection for insertion
-        try:
-            connection, cursor = self.db_manager.get_connection()
-            logger.info("Got database connection for batting data insertion")
-        except Exception as e:
-            logger.error(f"Failed to get database connection: {e}")
-            return df
-        
+        # Process each row individually
         for index, row in df.iterrows():
             try:
-                # Check if row exists with fresh connection check
-                connection, cursor = self.db_manager.get_connection()  # Refresh connection
+                # Get fresh connection for each check and insert
+                connection, cursor = self.db_manager.get_connection()
                 
                 if not self.db_manager.row_exists_batting(
                     row['Player'], row['RunsDescending'], row['Ground'], row['Start Date']
@@ -269,6 +280,7 @@ class DataProcessor:
                         logger.info(f"Inserted {inserted_count} batting records so far...")
                 else:
                     duplicate_count += 1
+                    logger.debug(f"Duplicate batting record skipped: {row['Player']} - {row['RunsDescending']} at {row['Ground']}")
                     
             except Exception as e:
                 error_count += 1
@@ -316,6 +328,9 @@ class DataProcessor:
         df['WktsDescending'] = df['WktsDescending'].replace('-', '0').astype(int)
         df['Econ'] = df['Econ'].replace('-', '0').astype(float)
         df['Start Date'] = pd.to_datetime(df['Start Date'], errors='coerce')
+        
+        # Normalize Start Date to remove time component
+        df['Start Date'] = df['Start Date'].apply(self.normalize_start_date)
 
         # Log the final DataFrame structure
         logger.info(f"Final bowling DataFrame columns: {list(df.columns)}")
@@ -325,18 +340,11 @@ class DataProcessor:
         duplicate_count = 0
         error_count = 0
         
-        # Get fresh connection for insertion
-        try:
-            connection, cursor = self.db_manager.get_connection()
-            logger.info("Got database connection for bowling data insertion")
-        except Exception as e:
-            logger.error(f"Failed to get database connection: {e}")
-            return df
-        
+        # Process each row individually
         for index, row in df.iterrows():
             try:
-                # Check if row exists with fresh connection check
-                connection, cursor = self.db_manager.get_connection()  # Refresh connection
+                # Get fresh connection for each check and insert
+                connection, cursor = self.db_manager.get_connection()
                 
                 if not self.db_manager.row_exists_bowling(
                     row['Player'], row['Overs'], row['Mdns'], row['Runs'], 
@@ -368,6 +376,7 @@ class DataProcessor:
                         logger.info(f"Inserted {inserted_count} bowling records so far...")
                 else:
                     duplicate_count += 1
+                    logger.debug(f"Duplicate bowling record skipped: {row['Player']} - {row['Overs']} overs at {row['Ground']}")
                     
             except Exception as e:
                 error_count += 1
