@@ -26,7 +26,11 @@ class AnalyticsService:
 
         def generate_match_id(self, row):
             # Extract only the date part to ignore time component
-            start_date = pd.to_datetime(row['Start Date']).strftime('%Y-%m-%d')
+            # Handle both datetime objects and strings
+            start_date_obj = row['Start Date']
+            if isinstance(start_date_obj, str):
+                start_date_obj = pd.to_datetime(start_date_obj)
+            start_date = start_date_obj.strftime('%Y-%m-%d')
             match_info = f"{row['Ground']}_{start_date}"
             match_id = hashlib.sha256(match_info.encode()).hexdigest()
             self.match_id_dict[match_id] = (row['Ground'], row['Start Date'])
