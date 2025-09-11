@@ -1,11 +1,12 @@
 import uuid
 import os
 import logging
+import time
 from datetime import datetime
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
-from selenium.common.exceptions import TimeoutException
+from selenium.common.exceptions import TimeoutException, NoSuchElementException
 from selenium.webdriver.support import expected_conditions as EC
 from bs4 import BeautifulSoup
 from config import CHROME_OPTIONS, CHROME_BINARY_LOCATION, URL_TEMPLATES, BASE_URL
@@ -43,13 +44,9 @@ class WebScraper:
         self.driver = webdriver.Chrome(options=options)
         return self.driver
     
-    def scrape_page_data(self, url):
-        """Scrape table data from the given URL"""
-        if not self.driver:
-            self.initialize_driver()
-        
+    def scrape_current_page_data(self):
+        """Scrape table data from the current page"""
         try:
-            self.driver.get(url)
             wait = WebDriverWait(self.driver, 10)
             table = wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "table")))
         except Exception as e:
@@ -66,8 +63,119 @@ class WebScraper:
             if row_data and len(row_data) > 1 and row_data[0] != 'Page1of2018':
                 data.append(row_data)
         
-        logger.info(f"Scraped {len(data)} rows from {url}")
+        logger.info(f"Scraped {len(data)} rows from current page")
         return data
+    
+    def has_next_button(self):
+        """Check if there's a Next button available and clickable"""
+        try:
+            # Look for the Next button using different strategies
+            next_selectors = [
+                "a[title='Next']",  # Link with title="Next"
+                "input[value='Next']",  # Input button with value="Next"
+                "a[href*='page=']",  # Link with page parameter
+                "a.paging",  # Paging class links
+                ".paging a"  # Links within paging section
+            ]
+            
+            # Try CSS selectors first
+            for selector in next_selectors:
+                try:
+                    elements = self.driver.find_elements(By.CSS_SELECTOR, selector)
+                    for element in elements:
+                        if element.is_enabled() and element.is_displayed():
+                            # Check if text contains "Next" (case insensitive)
+                            if "next" in element.text.lower() or element.get_attribute("title") and "next" in element.get_attribute("title").lower():
+                                return element
+                except NoSuchElementException:
+                    continue
+            
+            # Try finding by partial link text
+            try:
+                element = self.driver.find_element(By.PARTIAL_LINK_TEXT, "Next")
+                if element.is_enabled() and element.is_displayed():
+                    return element
+            except NoSuchElementException:
+                pass
+            
+            # Try finding all links and check their text
+            try:
+                all_links = self.driver.find_elements(By.TAG_NAME, "a")
+                for link in all_links:
+                    if link.text and "next" in link.text.lower() and link.is_enabled() and link.is_displayed():
+                        return link
+            except Exception:
+                pass
+                
+            return None
+            
+        except Exception as e:
+            logger.error(f"Error checking for next button: {e}")
+            return None
+    
+    def click_next_button(self):
+        """Click the Next button if available"""
+        next_button = self.has_next_button()
+        if next_button:
+            try:
+                # Scroll to the button to ensure it's visible
+                self.driver.execute_script("arguments[0].scrollIntoView(true);", next_button)
+                time.sleep(1)  # Brief pause after scrolling
+                
+                # Try clicking the button
+                next_button.click()
+                
+                # Wait for the page to load
+                time.sleep(2)
+                
+                # Wait for the table to be present on the new page
+                WebDriverWait(self.driver, 10).until(
+                    EC.presence_of_element_located((By.CSS_SELECTOR, "table"))
+                )
+                
+                logger.info("Successfully clicked Next button and loaded new page")
+                return True
+                
+            except Exception as e:
+                logger.error(f"Error clicking Next button: {e}")
+                return False
+        else:
+            logger.info("No Next button found - reached last page")
+            return False
+    
+    def scrape_page_data(self, url):
+        """Scrape table data from all pages starting from the given URL"""
+        if not self.driver:
+            self.initialize_driver()
+        
+        try:
+            self.driver.get(url)
+            logger.info(f"Loaded initial URL: {url}")
+            
+            all_data = []
+            page_number = 1
+            
+            while True:
+                logger.info(f"Scraping page {page_number}")
+                
+                # Scrape current page data
+                page_data = self.scrape_current_page_data()
+                all_data.extend(page_data)
+                
+                logger.info(f"Page {page_number}: scraped {len(page_data)} rows, total so far: {len(all_data)}")
+                
+                # Try to go to next page
+                if self.click_next_button():
+                    page_number += 1
+                else:
+                    logger.info(f"Finished scraping. Total pages: {page_number}, Total rows: {len(all_data)}")
+                    break
+            
+            return all_data
+            
+        except Exception as e:
+            logger.error(f"Error scraping pages: {e}")
+            return []
     
     def generate_url(self, table_type, start_date):
         """Generate URL for the specific dataset type and date"""
@@ -91,6 +199,7 @@ class WebScraper:
         
         try:
             data = self.scrape_page_data(url)
+            logger.info(f"Total rows scraped for {dataset_type}: {len(data)}")
             return data
         except Exception as e:
             logger.error(f"Failed to scrape {dataset_type} data: {e}")
