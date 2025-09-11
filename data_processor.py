@@ -110,15 +110,13 @@ class DataProcessor:
     
     def process_team_data(self, scraped_data, columns):
         """Process and store team data in the database"""
-        logger.info(f"Starting to process team data with {len(scraped_data)} scraped rows")
-        
         cleaned_data = self.clean_data(scraped_data, len(columns))
         df = self.convert_to_dataframe(cleaned_data, columns)
         df = self.clean_opposition_column(df)
         df = self.process_team_score(df)
         df = self.process_overs_column(df, column_name='Overs')
         
-        # Convert data types
+        # Convert data types like in original code
         df['RPO'] = df['RPO'].astype(float)
         df['Inns'] = df['Inns'].astype(int)
         df['Lead'] = df['Lead'].fillna(0).astype(int)
@@ -129,22 +127,11 @@ class DataProcessor:
         logger.info(f"DataFrame shape: {df.shape}")
         
         inserted_count = 0
-        duplicate_count = 0
-        error_count = 0
+        connection, cursor = self.db_manager.get_connection()
         
-        # Get fresh connection for insertion
-        try:
-            connection, cursor = self.db_manager.get_connection()
-            logger.info("Got database connection for team data insertion")
-        except Exception as e:
-            logger.error(f"Failed to get database connection: {e}")
-            return df
-        
-        for index, row in df.iterrows():
+        for _, row in df.iterrows():
             try:
-                # Check if row exists with fresh connection check
-                connection, cursor = self.db_manager.get_connection()  # Refresh connection
-                
+                # Check if row exists
                 if not self.db_manager.row_exists_team(
                     row['Team'], row['ScoreDescending'], row['Ground'], row['Start Date']
                 ):
@@ -170,43 +157,23 @@ class DataProcessor:
                     ))
                     connection.commit()
                     inserted_count += 1
-                    
-                    if inserted_count % 10 == 0:  # Log every 10 insertions
-                        logger.info(f"Inserted {inserted_count} team records so far...")
-                else:
-                    duplicate_count += 1
-                    
             except Exception as e:
-                error_count += 1
-                logger.error(f"Error inserting team row {index}: {e}")
+                logger.error(f"Error inserting team row: {e}")
                 logger.error(f"Row data: {dict(row)}")
-                
-                # Try to rollback and continue
-                try:
-                    connection.rollback()
-                except:
-                    pass
                 continue
         
-        logger.info(f"Team data processing complete:")
-        logger.info(f"  - Inserted: {inserted_count} new rows")
-        logger.info(f"  - Duplicates skipped: {duplicate_count}")
-        logger.info(f"  - Errors: {error_count}")
-        logger.info(f"  - Total processed: {len(df)}")
-        
+        logger.info(f"Team data processing complete. Inserted {inserted_count} new rows.")
         return df
 
     def process_batting_data(self, scraped_data, columns):
         """Process and store batting data in the database"""
-        logger.info(f"Starting to process batting data with {len(scraped_data)} scraped rows")
-        
         cleaned_data = self.clean_data(scraped_data, len(columns))
         df = self.convert_to_dataframe(cleaned_data, columns)
         df = self.clean_opposition_column(df)
         df = self.split_player_and_team(df, TEAM_MAPPING)
         
-        # Clean and convert data
-        df = df[~df['RunsDescending'].isin(['DNB', 'absent', 'sub'])]
+        # Clean and convert data like in original code
+        df = df[~df['RunsDescending'].isin(['DNB', 'absent'])]
         df['Not Out'] = df['RunsDescending'].apply(lambda x: 1 if '*' in str(x) else 0)
         df['RunsDescending'] = df['RunsDescending'].str.replace('*', '', regex=False)
         df = df.drop(columns=['Mins'])
@@ -223,22 +190,11 @@ class DataProcessor:
         logger.info(f"Batting DataFrame shape: {df.shape}")
         
         inserted_count = 0
-        duplicate_count = 0
-        error_count = 0
+        connection, cursor = self.db_manager.get_connection()
         
-        # Get fresh connection for insertion
-        try:
-            connection, cursor = self.db_manager.get_connection()
-            logger.info("Got database connection for batting data insertion")
-        except Exception as e:
-            logger.error(f"Failed to get database connection: {e}")
-            return df
-        
-        for index, row in df.iterrows():
+        for _, row in df.iterrows():
             try:
-                # Check if row exists with fresh connection check
-                connection, cursor = self.db_manager.get_connection()  # Refresh connection
-                
+                # Check if row exists
                 if not self.db_manager.row_exists_batting(
                     row['Player'], row['RunsDescending'], row['Ground'], row['Start Date']
                 ):
@@ -264,45 +220,25 @@ class DataProcessor:
                     ))
                     connection.commit()
                     inserted_count += 1
-                    
-                    if inserted_count % 10 == 0:  # Log every 10 insertions
-                        logger.info(f"Inserted {inserted_count} batting records so far...")
-                else:
-                    duplicate_count += 1
-                    
             except Exception as e:
-                error_count += 1
-                logger.error(f"Error inserting batting row {index}: {e}")
+                logger.error(f"Error inserting batting row: {e}")
                 logger.error(f"Row data: {dict(row)}")
-                
-                # Try to rollback and continue
-                try:
-                    connection.rollback()
-                except:
-                    pass
                 continue
         
-        logger.info(f"Batting data processing complete:")
-        logger.info(f"  - Inserted: {inserted_count} new rows")
-        logger.info(f"  - Duplicates skipped: {duplicate_count}")
-        logger.info(f"  - Errors: {error_count}")
-        logger.info(f"  - Total processed: {len(df)}")
-        
+        logger.info(f"Batting data processing complete. Inserted {inserted_count} new rows.")
         return df
 
     def process_bowling_data(self, scraped_data, columns):
         """Process and store bowling data in the database"""
-        logger.info(f"Starting to process bowling data with {len(scraped_data)} scraped rows")
-        
         cleaned_data = self.clean_data(scraped_data, len(columns))
         df = self.convert_to_dataframe(cleaned_data, columns)
         df = self.clean_opposition_column(df)
         df = self.split_player_and_team(df, TEAM_MAPPING)
         
-        # Clean and convert data - FILTER OUT DNB/absent FIRST
-        df = df[~df['WktsDescending'].isin(['DNB', 'absent', 'sub'])]
+        # Clean and convert data like in original code - FILTER OUT DNB/absent FIRST
+        df = df[~df['WktsDescending'].isin(['DNB', 'absent'])]
         # Also filter out DNB from Overs column before processing
-        df = df[~df['Overs'].isin(['DNB', 'absent', 'sub'])]
+        df = df[~df['Overs'].isin(['DNB', 'absent'])]
         df = self.process_overs_column(df, column_name='Overs')
         
         # Handle Inns column more carefully
@@ -322,22 +258,11 @@ class DataProcessor:
         logger.info(f"Bowling DataFrame shape: {df.shape}")
 
         inserted_count = 0
-        duplicate_count = 0
-        error_count = 0
+        connection, cursor = self.db_manager.get_connection()
         
-        # Get fresh connection for insertion
-        try:
-            connection, cursor = self.db_manager.get_connection()
-            logger.info("Got database connection for bowling data insertion")
-        except Exception as e:
-            logger.error(f"Failed to get database connection: {e}")
-            return df
-        
-        for index, row in df.iterrows():
+        for _, row in df.iterrows():
             try:
-                # Check if row exists with fresh connection check
-                connection, cursor = self.db_manager.get_connection()  # Refresh connection
-                
+                # Check if row exists
                 if not self.db_manager.row_exists_bowling(
                     row['Player'], row['Overs'], row['Mdns'], row['Runs'], 
                     row['WktsDescending'], row['Ground'], row['Start Date']
@@ -363,28 +288,10 @@ class DataProcessor:
                     ))
                     connection.commit()
                     inserted_count += 1
-                    
-                    if inserted_count % 10 == 0:  # Log every 10 insertions
-                        logger.info(f"Inserted {inserted_count} bowling records so far...")
-                else:
-                    duplicate_count += 1
-                    
             except Exception as e:
-                error_count += 1
-                logger.error(f"Error inserting bowling row {index}: {e}")
+                logger.error(f"Error inserting bowling row: {e}")
                 logger.error(f"Row data: {dict(row)}")
-                
-                # Try to rollback and continue
-                try:
-                    connection.rollback()
-                except:
-                    pass
                 continue
         
-        logger.info(f"Bowling data processing complete:")
-        logger.info(f"  - Inserted: {inserted_count} new rows")
-        logger.info(f"  - Duplicates skipped: {duplicate_count}")
-        logger.info(f"  - Errors: {error_count}")
-        logger.info(f"  - Total processed: {len(df)}")
-        
+        logger.info(f"Bowling data processing complete. Inserted {inserted_count} new rows.")
         return df
