@@ -102,30 +102,26 @@ class DataProcessor:
                     overs_in_float = int(overs_parts[0]) + (int(overs_parts[1]) / 6)
                     return overs_in_float
                 else:
-                    return float(overs)
+                    try:
+                        return float(overs)
+                    except ValueError:
+                        return float('nan') # Return NaN for non-numeric strings
             return float('nan')
 
         dataframe[column_name] = dataframe[column_name].apply(convert_overs_to_float)
         return dataframe
     
-    def normalize_start_date(self, date_value):
-        """Normalize Start Date to date only (strip time component)"""
-        if pd.isna(date_value):
+    def normalize_start_date(self, date_series):
+        """Helper to normalize dates, ensuring proper timezone handling"""
+        if pd.isna(date_series):
             return None
         
-        if isinstance(date_value, str):
-            try:
-                # Parse the datetime string and extract only the date part
-                dt = pd.to_datetime(date_value)
-                return dt.date()
-            except:
-                return None
-        elif hasattr(date_value, 'date'):
-            # If it's already a datetime object, extract the date
-            return date_value.date()
-        else:
-            return date_value
-    
+        try:
+            return pd.to_datetime(date_series).normalize()
+        except Exception as e:
+            logger.error(f"Error normalizing date: {e} with value {date_series}")
+            return None
+            
     def process_team_data(self, scraped_data, columns):
         """Process and store team data in the database"""
         logger.info(f"Starting to process team data with {len(scraped_data)} scraped rows")
@@ -136,7 +132,7 @@ class DataProcessor:
         df = self.process_team_score(df)
         df = self.process_overs_column(df, column_name='Overs')
         
-        # Convert data types like in original code
+        # Convert data types
         df['RPO'] = df['RPO'].astype(float)
         df['Inns'] = df['Inns'].astype(int)
         df['Lead'] = df['Lead'].fillna(0).astype(int)
@@ -156,12 +152,12 @@ class DataProcessor:
         # Process each row individually
         for index, row in df.iterrows():
             try:
-                # Get fresh connection for each check and insert
-                connection, cursor = self.db_manager.get_connection()
-                
                 if not self.db_manager.row_exists_team(
                     row['Team'], row['ScoreDescending'], row['Ground'], row['Start Date']
                 ):
+                    # Get fresh connection for each insert (original pattern)
+                    connection, cursor = self.db_manager.get_connection()
+                    
                     # Insert single row
                     query = """
                     INSERT INTO team (`Team`, `ScoreDescending`, `Overs`, `RPO`, `Lead`, `Inns`, 
@@ -187,6 +183,7 @@ class DataProcessor:
                     
                     if inserted_count % 10 == 0:  # Log every 10 insertions
                         logger.info(f"Inserted {inserted_count} team records so far...")
+                    self.db_manager.release_connection(connection, cursor)
                 else:
                     duplicate_count += 1
                     logger.debug(f"Duplicate team record skipped: {row['Team']} - {row['ScoreDescending']} at {row['Ground']}")
@@ -198,7 +195,9 @@ class DataProcessor:
                 
                 # Try to rollback and continue
                 try:
-                    connection.rollback()
+                    if 'connection' in locals():
+                        connection.rollback()
+                        self.db_manager.release_connection(connection, cursor)
                 except:
                     pass
                 continue
@@ -220,7 +219,7 @@ class DataProcessor:
         df = self.clean_opposition_column(df)
         df = self.split_player_and_team(df, TEAM_MAPPING)
         
-        # Clean and convert data like in original code
+        # Clean and convert data
         df = df[~df['RunsDescending'].isin(['DNB', 'absent', 'sub'])]
         df['Not Out'] = df['RunsDescending'].apply(lambda x: 1 if '*' in str(x) else 0)
         df['RunsDescending'] = df['RunsDescending'].str.replace('*', '', regex=False)
@@ -247,16 +246,16 @@ class DataProcessor:
         # Process each row individually
         for index, row in df.iterrows():
             try:
-                # Get fresh connection for each check and insert
-                connection, cursor = self.db_manager.get_connection()
-                
                 if not self.db_manager.row_exists_batting(
                     row['Player'], row['RunsDescending'], row['Ground'], row['Start Date']
                 ):
+                    # Get fresh connection for each insert
+                    connection, cursor = self.db_manager.get_connection()
+                    
                     # Insert single row
                     query = """
                     INSERT INTO batting (`Player`, `RunsDescending`, `BF`, `4s`, `6s`, `SR`, `Inns`,
-                                       `Opposition`, `Ground`, `Start Date`, `Not Out`, `Team`)
+                                        `Opposition`, `Ground`, `Start Date`, `Not Out`, `Team`)
                     VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     """
                     cursor.execute(query, (
@@ -278,6 +277,7 @@ class DataProcessor:
                     
                     if inserted_count % 10 == 0:  # Log every 10 insertions
                         logger.info(f"Inserted {inserted_count} batting records so far...")
+                    self.db_manager.release_connection(connection, cursor)
                 else:
                     duplicate_count += 1
                     logger.debug(f"Duplicate batting record skipped: {row['Player']} - {row['RunsDescending']} at {row['Ground']}")
@@ -289,7 +289,9 @@ class DataProcessor:
                 
                 # Try to rollback and continue
                 try:
-                    connection.rollback()
+                    if 'connection' in locals():
+                        connection.rollback()
+                        self.db_manager.release_connection(connection, cursor)
                 except:
                     pass
                 continue
@@ -311,9 +313,8 @@ class DataProcessor:
         df = self.clean_opposition_column(df)
         df = self.split_player_and_team(df, TEAM_MAPPING)
         
-        # Clean and convert data like in original code - FILTER OUT DNB/absent FIRST
+        # Clean and convert data
         df = df[~df['WktsDescending'].isin(['DNB', 'absent', 'sub'])]
-        # Also filter out DNB from Overs column before processing
         df = df[~df['Overs'].isin(['DNB', 'absent', 'sub'])]
         df = self.process_overs_column(df, column_name='Overs')
         
@@ -343,17 +344,17 @@ class DataProcessor:
         # Process each row individually
         for index, row in df.iterrows():
             try:
-                # Get fresh connection for each check and insert
-                connection, cursor = self.db_manager.get_connection()
-                
                 if not self.db_manager.row_exists_bowling(
                     row['Player'], row['Overs'], row['Mdns'], row['Runs'], 
                     row['WktsDescending'], row['Ground'], row['Start Date']
                 ):
+                    # Get fresh connection for each insert
+                    connection, cursor = self.db_manager.get_connection()
+                    
                     # Insert single row
                     query = """
                     INSERT INTO bowling (`Player`, `Overs`, `Mdns`, `Runs`, `WktsDescending`, `Econ`,
-                                       `Inns`, `Opposition`, `Ground`, `Start Date`, `Team`)
+                                        `Inns`, `Opposition`, `Ground`, `Start Date`, `Team`)
                     VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     """
                     cursor.execute(query, (
@@ -374,6 +375,7 @@ class DataProcessor:
                     
                     if inserted_count % 10 == 0:  # Log every 10 insertions
                         logger.info(f"Inserted {inserted_count} bowling records so far...")
+                    self.db_manager.release_connection(connection, cursor)
                 else:
                     duplicate_count += 1
                     logger.debug(f"Duplicate bowling record skipped: {row['Player']} - {row['Overs']} overs at {row['Ground']}")
@@ -385,7 +387,9 @@ class DataProcessor:
                 
                 # Try to rollback and continue
                 try:
-                    connection.rollback()
+                    if 'connection' in locals():
+                        connection.rollback()
+                        self.db_manager.release_connection(connection, cursor)
                 except:
                     pass
                 continue
