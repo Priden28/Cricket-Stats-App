@@ -140,29 +140,45 @@ class WebScraper:
                 self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", next_button)
                 time.sleep(1)  # Brief pause after scrolling
                 
-                # Get current URL to compare after click
+                # Get current URL and page content hash to compare after click
                 current_url = self.driver.current_url
+                # Get a unique identifier from current page (like first few rows of data)
+                try:
+                    current_page_identifier = self.driver.find_element(By.CSS_SELECTOR, "table tr:nth-child(2)").text
+                except:
+                    current_page_identifier = ""
                 
                 # Try clicking the button
                 next_button.click()
                 logger.info("Clicked Next button")
                 
-                # Wait for the page to change
-                time.sleep(3)
+                # Wait longer for the page to change
+                time.sleep(5)
                 
-                # Check if URL changed or wait for new content
+                # Check if the page actually changed by comparing content
                 try:
-                    # Wait for either URL change or table to reload
-                    WebDriverWait(self.driver, 15).until(
-                        lambda driver: driver.current_url != current_url or
-                        EC.presence_of_element_located((By.CSS_SELECTOR, "table"))
-                    )
-                    logger.info("Successfully navigated to next page")
-                    return True
-                except TimeoutException:
-                    logger.warning("Page didn't change after clicking Next - might be on last page")
+                    # Wait up to 20 seconds for page content to change
+                    for attempt in range(10):  # 10 attempts, 2 seconds each = 20 seconds max
+                        time.sleep(2)
+                        try:
+                            new_page_identifier = self.driver.find_element(By.CSS_SELECTOR, "table tr:nth-child(2)").text
+                            new_url = self.driver.current_url
+                            
+                            # Check if either URL changed OR table content changed
+                            if new_url != current_url or new_page_identifier != current_page_identifier:
+                                logger.info(f"Successfully navigated to next page (attempt {attempt + 1})")
+                                return True
+                        except:
+                            # If we can't find the table row, page might still be loading
+                            continue
+                    
+                    logger.warning("Page content didn't change after clicking Next - likely on last page")
                     return False
-                
+                    
+                except Exception as e:
+                    logger.error(f"Error waiting for page change: {e}")
+                    return False
+                    
             except Exception as e:
                 logger.error(f"Error clicking Next button: {e}")
                 return False
@@ -187,33 +203,49 @@ class WebScraper:
             
             all_data = []
             page_number = 1
-            max_pages = 50  # Safety limit to prevent infinite loops
+            max_pages = 100  # Increased safety limit
+            consecutive_empty_pages = 0  # Track empty pages to break early if needed
             
             while page_number <= max_pages:
                 logger.info(f"Scraping page {page_number}")
                 
+                # Add a small delay to ensure page is fully rendered
+                time.sleep(3)
+                
                 # Scrape current page data
                 page_data = self.scrape_current_page_data()
-                all_data.extend(page_data)
                 
-                logger.info(f"Page {page_number}: scraped {len(page_data)} rows, total so far: {len(all_data)}")
-                
-                # If no data on current page, might be an issue
-                if not page_data:
-                    logger.warning(f"No data found on page {page_number}")
-                    break
+                if page_data:
+                    all_data.extend(page_data)
+                    consecutive_empty_pages = 0  # Reset counter
+                    logger.info(f"Page {page_number}: scraped {len(page_data)} rows, total so far: {len(all_data)}")
+                else:
+                    consecutive_empty_pages += 1
+                    logger.warning(f"No data found on page {page_number} (empty page #{consecutive_empty_pages})")
+                    
+                    # If we get 3 consecutive empty pages, something is wrong
+                    if consecutive_empty_pages >= 3:
+                        logger.error("Too many consecutive empty pages - stopping scraping")
+                        break
                 
                 # Try to go to next page
+                logger.info(f"Attempting to navigate from page {page_number} to page {page_number + 1}")
                 if self.click_next_button():
                     page_number += 1
-                    # Small delay between pages
-                    time.sleep(2)
+                    logger.info(f"Successfully moved to page {page_number}")
                 else:
-                    logger.info(f"Finished scraping. Total pages: {page_number}, Total rows: {len(all_data)}")
+                    logger.info(f"No more pages available. Finished scraping at page {page_number}")
+                    logger.info(f"Final totals - Pages: {page_number}, Total rows: {len(all_data)}")
                     break
             
             if page_number > max_pages:
                 logger.warning(f"Reached maximum page limit ({max_pages})")
+            
+            # Final summary
+            logger.info(f"Scraping complete:")
+            logger.info(f"  - Total pages processed: {page_number}")
+            logger.info(f"  - Total rows collected: {len(all_data)}")
+            logger.info(f"  - Average rows per page: {len(all_data) / page_number if page_number > 0 else 0:.1f}")
             
             return all_data
             
