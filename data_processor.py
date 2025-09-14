@@ -111,15 +111,24 @@ class DataProcessor:
         dataframe[column_name] = dataframe[column_name].apply(convert_overs_to_float)
         return dataframe
     
-    def normalize_start_date(self, date_series):
-        """Helper to normalize dates, ensuring proper timezone handling"""
-        if pd.isna(date_series):
+    def normalize_start_date(self, date_value):
+        """Helper to normalize dates to date-only format, ensuring consistent format"""
+        if pd.isna(date_value):
             return None
         
         try:
-            return pd.to_datetime(date_series).normalize()
+            # Convert to datetime if it's not already
+            if isinstance(date_value, str):
+                dt = pd.to_datetime(date_value)
+            elif isinstance(date_value, datetime):
+                dt = date_value
+            else:
+                dt = pd.to_datetime(date_value)
+            
+            # Return date-only format as string to ensure consistency
+            return dt.strftime('%Y-%m-%d')
         except Exception as e:
-            logger.error(f"Error normalizing date: {e} with value {date_series}")
+            logger.error(f"Error normalizing date: {e} with value {date_value}")
             return None
             
     def process_team_data(self, scraped_data, columns):
@@ -138,7 +147,7 @@ class DataProcessor:
         df['Lead'] = df['Lead'].fillna(0).astype(int)
         df['Start Date'] = pd.to_datetime(df['Start Date'], errors='coerce')
         
-        # Normalize Start Date to remove time component
+        # Normalize Start Date to remove time component and ensure consistent format
         df['Start Date'] = df['Start Date'].apply(self.normalize_start_date)
         
         # Log the final DataFrame structure
@@ -151,11 +160,13 @@ class DataProcessor:
         
         # Process each row individually
         for index, row in df.iterrows():
+            connection = None
+            cursor = None
             try:
                 if not self.db_manager.row_exists_team(
                     row['Team'], row['ScoreDescending'], row['Ground'], row['Start Date']
                 ):
-                    # Get fresh connection for each insert (original pattern)
+                    # Get fresh connection for each insert
                     connection, cursor = self.db_manager.get_connection()
                     
                     # Insert single row
@@ -183,7 +194,6 @@ class DataProcessor:
                     
                     if inserted_count % 10 == 0:  # Log every 10 insertions
                         logger.info(f"Inserted {inserted_count} team records so far...")
-                    self.db_manager.release_connection(connection, cursor)
                 else:
                     duplicate_count += 1
                     logger.debug(f"Duplicate team record skipped: {row['Team']} - {row['ScoreDescending']} at {row['Ground']}")
@@ -195,12 +205,17 @@ class DataProcessor:
                 
                 # Try to rollback and continue
                 try:
-                    if 'connection' in locals():
+                    if connection:
                         connection.rollback()
+                except:
+                    pass
+            finally:
+                # Always release connection properly
+                try:
+                    if connection and cursor:
                         self.db_manager.release_connection(connection, cursor)
                 except:
                     pass
-                continue
         
         logger.info(f"Team data processing complete:")
         logger.info(f"  - Inserted: {inserted_count} new rows")
@@ -232,7 +247,7 @@ class DataProcessor:
         df['SR'] = df['SR'].str.strip().replace('-', '0').astype(float)
         df['Start Date'] = pd.to_datetime(df['Start Date'], errors='coerce')
         
-        # Normalize Start Date to remove time component
+        # Normalize Start Date to remove time component and ensure consistent format
         df['Start Date'] = df['Start Date'].apply(self.normalize_start_date)
         
         # Log the final DataFrame structure
@@ -245,6 +260,8 @@ class DataProcessor:
         
         # Process each row individually
         for index, row in df.iterrows():
+            connection = None
+            cursor = None
             try:
                 if not self.db_manager.row_exists_batting(
                     row['Player'], row['RunsDescending'], row['Ground'], row['Start Date']
@@ -277,7 +294,6 @@ class DataProcessor:
                     
                     if inserted_count % 10 == 0:  # Log every 10 insertions
                         logger.info(f"Inserted {inserted_count} batting records so far...")
-                    self.db_manager.release_connection(connection, cursor)
                 else:
                     duplicate_count += 1
                     logger.debug(f"Duplicate batting record skipped: {row['Player']} - {row['RunsDescending']} at {row['Ground']}")
@@ -289,12 +305,17 @@ class DataProcessor:
                 
                 # Try to rollback and continue
                 try:
-                    if 'connection' in locals():
+                    if connection:
                         connection.rollback()
+                except:
+                    pass
+            finally:
+                # Always release connection properly
+                try:
+                    if connection and cursor:
                         self.db_manager.release_connection(connection, cursor)
                 except:
                     pass
-                continue
         
         logger.info(f"Batting data processing complete:")
         logger.info(f"  - Inserted: {inserted_count} new rows")
@@ -330,7 +351,7 @@ class DataProcessor:
         df['Econ'] = df['Econ'].replace('-', '0').astype(float)
         df['Start Date'] = pd.to_datetime(df['Start Date'], errors='coerce')
         
-        # Normalize Start Date to remove time component
+        # Normalize Start Date to remove time component and ensure consistent format
         df['Start Date'] = df['Start Date'].apply(self.normalize_start_date)
 
         # Log the final DataFrame structure
@@ -343,6 +364,8 @@ class DataProcessor:
         
         # Process each row individually
         for index, row in df.iterrows():
+            connection = None
+            cursor = None
             try:
                 if not self.db_manager.row_exists_bowling(
                     row['Player'], row['Overs'], row['Mdns'], row['Runs'], 
@@ -373,9 +396,8 @@ class DataProcessor:
                     connection.commit()
                     inserted_count += 1
                     
-                    if inserted_count % 10 == 0:  # Log every 10 insertions
+                    if inserted_count % 10 insertions
                         logger.info(f"Inserted {inserted_count} bowling records so far...")
-                    self.db_manager.release_connection(connection, cursor)
                 else:
                     duplicate_count += 1
                     logger.debug(f"Duplicate bowling record skipped: {row['Player']} - {row['Overs']} overs at {row['Ground']}")
@@ -387,12 +409,17 @@ class DataProcessor:
                 
                 # Try to rollback and continue
                 try:
-                    if 'connection' in locals():
+                    if connection:
                         connection.rollback()
+                except:
+                    pass
+            finally:
+                # Always release connection properly
+                try:
+                    if connection and cursor:
                         self.db_manager.release_connection(connection, cursor)
                 except:
                     pass
-                continue
         
         logger.info(f"Bowling data processing complete:")
         logger.info(f"  - Inserted: {inserted_count} new rows")
