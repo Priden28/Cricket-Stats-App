@@ -396,7 +396,7 @@ class DataProcessor:
                     connection.commit()
                     inserted_count += 1
                     
-                    if inserted_count % 10 insertions
+                    if inserted_count % 10 == 0:  # Log every 10 insertions
                         logger.info(f"Inserted {inserted_count} bowling records so far...")
                 else:
                     duplicate_count += 1
