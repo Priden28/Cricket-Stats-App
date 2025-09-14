@@ -136,48 +136,79 @@ class WebScraper:
         next_button = self.has_next_button()
         if next_button:
             try:
+                logger.info(f"Attempting to click Next button: {next_button.tag_name} with text '{next_button.text}' and href '{next_button.get_attribute('href')}'")
+                
                 # Scroll to the button to ensure it's visible
                 self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", next_button)
                 time.sleep(1)  # Brief pause after scrolling
                 
-                # Get current URL and page content hash to compare after click
+                # Get current URL and page content to compare after click
                 current_url = self.driver.current_url
-                # Get a unique identifier from current page (like first few rows of data)
-                try:
-                    current_page_identifier = self.driver.find_element(By.CSS_SELECTOR, "table tr:nth-child(2)").text
-                except:
-                    current_page_identifier = ""
+                logger.info(f"Current URL before click: {current_url}")
                 
-                # Try clicking the button
-                next_button.click()
-                logger.info("Clicked Next button")
+                # Get a unique identifier from current page
+                try:
+                    current_page_identifier = self.driver.find_element(By.CSS_SELECTOR, "table tr:nth-child(2)").text[:100]
+                    logger.info(f"Current page identifier (first 100 chars): {current_page_identifier}")
+                except Exception as e:
+                    current_page_identifier = ""
+                    logger.warning(f"Could not get page identifier: {e}")
+                
+                # Try clicking the button using JavaScript as backup
+                try:
+                    # First try normal click
+                    next_button.click()
+                    logger.info("Normal click executed")
+                except Exception as e:
+                    logger.warning(f"Normal click failed: {e}, trying JavaScript click")
+                    # Fallback to JavaScript click
+                    self.driver.execute_script("arguments[0].click();", next_button)
+                    logger.info("JavaScript click executed")
                 
                 # Wait longer for the page to change
-                time.sleep(5)
+                logger.info("Waiting for page to change...")
+                time.sleep(3)  # Initial wait
                 
                 # Check if the page actually changed by comparing content
-                try:
-                    # Wait up to 20 seconds for page content to change
-                    for attempt in range(10):  # 10 attempts, 2 seconds each = 20 seconds max
+                max_attempts = 15  # 15 attempts, 2 seconds each = 30 seconds max
+                for attempt in range(max_attempts):
+                    try:
                         time.sleep(2)
+                        new_url = self.driver.current_url
+                        
+                        # Check URL change first (most reliable)
+                        if new_url != current_url:
+                            logger.info(f"URL changed from {current_url} to {new_url} (attempt {attempt + 1})")
+                            return True
+                        
+                        # Check table content change
                         try:
-                            new_page_identifier = self.driver.find_element(By.CSS_SELECTOR, "table tr:nth-child(2)").text
-                            new_url = self.driver.current_url
-                            
-                            # Check if either URL changed OR table content changed
-                            if new_url != current_url or new_page_identifier != current_page_identifier:
-                                logger.info(f"Successfully navigated to next page (attempt {attempt + 1})")
+                            new_page_identifier = self.driver.find_element(By.CSS_SELECTOR, "table tr:nth-child(2)").text[:100]
+                            if new_page_identifier != current_page_identifier and new_page_identifier:
+                                logger.info(f"Page content changed (attempt {attempt + 1})")
+                                logger.info(f"Old content: {current_page_identifier}")
+                                logger.info(f"New content: {new_page_identifier}")
                                 return True
-                        except:
-                            # If we can't find the table row, page might still be loading
-                            continue
-                    
-                    logger.warning("Page content didn't change after clicking Next - likely on last page")
-                    return False
-                    
-                except Exception as e:
-                    logger.error(f"Error waiting for page change: {e}")
-                    return False
+                        except Exception as e:
+                            logger.debug(f"Could not check table content change: {e}")
+                        
+                        # Check page number indicator if available
+                        try:
+                            page_info_elements = self.driver.find_elements(By.XPATH, "//*[contains(text(), 'Page') and contains(text(), 'of')]")
+                            if page_info_elements:
+                                new_page_info = page_info_elements[0].text
+                                logger.debug(f"Page info: {new_page_info}")
+                        except Exception:
+                            pass
+                        
+                        logger.debug(f"Page hasn't changed yet (attempt {attempt + 1}/{max_attempts})")
+                        
+                    except Exception as e:
+                        logger.debug(f"Error during page change check (attempt {attempt + 1}): {e}")
+                        continue
+                
+                logger.warning("Page content didn't change after clicking Next - likely on last page or navigation failed")
+                return False
                     
             except Exception as e:
                 logger.error(f"Error clicking Next button: {e}")
