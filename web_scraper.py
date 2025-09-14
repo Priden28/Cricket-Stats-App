@@ -54,7 +54,7 @@ class WebScraper:
             raise
     
     def scrape_current_page_data(self):
-        """Scrape table data from the current page with enhanced debugging"""
+        """Scrape table data from the current page"""
         try:
             wait = WebDriverWait(self.driver, 15)
             table = wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "table")))
@@ -63,88 +63,17 @@ class WebScraper:
             logger.error(f"Error locating table: {e}")
             return []
 
-        # Wait a bit longer for dynamic content to load
-        time.sleep(2)
-        
         html_content = self.driver.page_source
         soup = BeautifulSoup(html_content, "html.parser")
-        
-        # Find all tables and use the main data table
-        tables = soup.find_all("table")
-        logger.info(f"Found {len(tables)} tables on page")
-        
-        if not tables:
-            logger.error("No tables found in page source")
-            return []
-        
-        # Use the first table (or find the correct one if there are multiple)
-        table = tables[0]
-        rows = table.find_all("tr")
-        
-        logger.info(f"Found {len(rows)} total rows in table")
-        
+        rows = soup.select("table tr")
+
         data = []
-        filtered_out_count = 0
+        for row in rows[1:]:  # Skip the header row
+            row_data = [cell.get_text(strip=True) for cell in row.select("td")]
+            if row_data and len(row_data) > 1 and row_data[0] != 'Page1of2018':
+                data.append(row_data)
         
-        for i, row in enumerate(rows):
-            # Skip header row (first row)
-            if i == 0:
-                header_cells = [cell.get_text(strip=True) for cell in row.find_all(['th', 'td'])]
-                logger.info(f"Header row: {header_cells}")
-                continue
-                
-            # Get all cells in the row
-            cells = row.find_all('td')
-            if not cells:
-                logger.debug(f"Row {i}: No td cells found, skipping")
-                continue
-                
-            row_data = [cell.get_text(strip=True) for cell in cells]
-            
-            # Debug: Log first few and last few rows
-            if i <= 3 or i >= len(rows) - 3:
-                logger.info(f"Row {i}: {row_data}")
-            
-            # Original filtering conditions with logging
-            if not row_data:
-                logger.debug(f"Row {i}: Empty row_data, skipping")
-                filtered_out_count += 1
-                continue
-                
-            if len(row_data) <= 1:
-                logger.debug(f"Row {i}: Too few columns ({len(row_data)}), skipping")
-                filtered_out_count += 1
-                continue
-                
-            # Check the problematic filter condition
-            if row_data[0] == 'Page1of2018':
-                logger.debug(f"Row {i}: Filtered out pagination text: {row_data[0]}")
-                filtered_out_count += 1
-                continue
-                
-            # Additional checks for common pagination/navigation text
-            first_cell = row_data[0].lower()
-            if any(pagination_text in first_cell for pagination_text in ['page', 'next', 'previous', 'first', 'last']):
-                logger.debug(f"Row {i}: Filtered out navigation text: {row_data[0]}")
-                filtered_out_count += 1
-                continue
-                
-            # If we get here, it's a valid data row
-            data.append(row_data)
-        
-        logger.info(f"Page scraping summary:")
-        logger.info(f"  - Total rows in table: {len(rows)}")
-        logger.info(f"  - Valid data rows extracted: {len(data)}")
-        logger.info(f"  - Rows filtered out: {filtered_out_count}")
-        
-        # If we got very few rows, log the raw table content for debugging
-        if len(data) < 10:
-            logger.warning(f"Very few rows extracted ({len(data)}), logging raw table content:")
-            for i, row in enumerate(rows[:5]):  # First 5 rows
-                cells = row.find_all(['td', 'th'])
-                cell_texts = [cell.get_text(strip=True) for cell in cells]
-                logger.warning(f"Raw row {i}: {cell_texts}")
-        
+        logger.info(f"Scraped {len(data)} rows from current page")
         return data
     
     def has_next_button(self):
@@ -258,7 +187,7 @@ class WebScraper:
             return False
     
     def scrape_page_data(self, url):
-        """Scrape table data from all pages starting from the given URL with enhanced debugging"""
+        """Scrape table data from all pages starting from the given URL"""
         if not self.driver:
             self.initialize_driver()
         
@@ -274,65 +203,54 @@ class WebScraper:
             
             all_data = []
             page_number = 1
-            max_pages = 100
-            
-            # Track data across pages for debugging
-            page_data_counts = []
+            max_pages = 100  # Increased safety limit
+            consecutive_empty_pages = 0  # Track empty pages to break early if needed
             
             while page_number <= max_pages:
-                logger.info(f"=== SCRAPING PAGE {page_number} ===")
+                logger.info(f"Scraping page {page_number}")
                 
-                # Add a delay to ensure page is fully rendered
+                # Add a small delay to ensure page is fully rendered
                 time.sleep(3)
                 
                 # Scrape current page data
                 page_data = self.scrape_current_page_data()
-                page_data_counts.append(len(page_data))
                 
                 if page_data:
                     all_data.extend(page_data)
-                    logger.info(f"Page {page_number}: Added {len(page_data)} rows, total so far: {len(all_data)}")
+                    consecutive_empty_pages = 0  # Reset counter
+                    logger.info(f"Page {page_number}: scraped {len(page_data)} rows, total so far: {len(all_data)}")
+                else:
+                    consecutive_empty_pages += 1
+                    logger.warning(f"No data found on page {page_number} (empty page #{consecutive_empty_pages})")
                     
-                    # Log sample data from this page
-                    if len(page_data) > 0:
-                        logger.info(f"Sample from page {page_number}: {page_data[0][:3] if len(page_data[0]) > 3 else page_data[0]}")
-                        
-                else:
-                    logger.warning(f"Page {page_number}: No data extracted!")
-                
-                # Check for next page
-                logger.info(f"Checking for next page after page {page_number}")
-                next_button = self.has_next_button()
-                
-                if next_button:
-                    logger.info(f"Next button found, attempting to navigate to page {page_number + 1}")
-                    if self.click_next_button():
-                        page_number += 1
-                        logger.info(f"Successfully navigated to page {page_number}")
-                    else:
-                        logger.warning(f"Failed to navigate to next page, stopping at page {page_number}")
+                    # If we get 3 consecutive empty pages, something is wrong
+                    if consecutive_empty_pages >= 3:
+                        logger.error("Too many consecutive empty pages - stopping scraping")
                         break
+                
+                # Try to go to next page
+                logger.info(f"Attempting to navigate from page {page_number} to page {page_number + 1}")
+                if self.click_next_button():
+                    page_number += 1
+                    logger.info(f"Successfully moved to page {page_number}")
                 else:
-                    logger.info(f"No next button found, finishing at page {page_number}")
+                    logger.info(f"No more pages available. Finished scraping at page {page_number}")
+                    logger.info(f"Final totals - Pages: {page_number}, Total rows: {len(all_data)}")
                     break
             
-            # Final comprehensive summary
-            logger.info(f"=== SCRAPING COMPLETE ===")
-            logger.info(f"Total pages processed: {page_number}")
-            logger.info(f"Total rows collected: {len(all_data)}")
-            logger.info(f"Data per page: {page_data_counts}")
-            logger.info(f"Average rows per page: {sum(page_data_counts) / len(page_data_counts) if page_data_counts else 0:.1f}")
+            if page_number > max_pages:
+                logger.warning(f"Reached maximum page limit ({max_pages})")
             
-            # If we got much fewer rows than expected, log a warning
-            if len(all_data) < 100 and page_number > 2:
-                logger.warning(f"WARNING: Only collected {len(all_data)} rows across {page_number} pages. This seems low.")
+            # Final summary
+            logger.info(f"Scraping complete:")
+            logger.info(f"  - Total pages processed: {page_number}")
+            logger.info(f"  - Total rows collected: {len(all_data)}")
+            logger.info(f"  - Average rows per page: {len(all_data) / page_number if page_number > 0 else 0:.1f}")
             
             return all_data
             
         except Exception as e:
             logger.error(f"Error scraping pages: {e}")
-            import traceback
-            logger.error(f"Traceback: {traceback.format_exc()}")
             return []
     
     def generate_url(self, table_type, start_date):
